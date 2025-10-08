@@ -1,0 +1,38 @@
+name: Build & Deploy Master Data Service to VPS via GHCR
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Build Docker image
+        run: |
+          docker build -t ghcr.io/${{ github.repository_owner }}/master-data-service-coffe:latest .
+
+      - name: Push Docker image to GHCR
+        run: docker push ghcr.io/${{ github.repository_owner }}/master-data-service-coffe:latest
+
+      - name: Deploy to VPS
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -p 31086 -H ${{ secrets.VPS_HOST }} >> ~/.ssh/known_hosts
+          
+          ssh -p 31086 -i ~/.ssh/id_ed25519 deploy@${{ secrets.VPS_HOST }} << 'EOF'
+            docker login ghcr.io -u ${{ github.repository_owner }} -p '${{ secrets.GHCR_TOKEN }}'
+            docker pull ghcr.io/${{ github.repository_owner }}/master-data-service-coffe:latest
+            docker stop master-data-service-coffe || true && docker rm master-data-service-coffe || true 
+          
+            docker run --env-file /home/deploy/env_project/coffe/master_data_service/.env -d --name master-data-service-coffe --network coffe-net -p 8001:8001 --memory="512m" --cpus="1.0" --restart=on-failure:5 ghcr.io/${{ github.repository_owner }}/master-data-service-coffe:latest
+          EOF
