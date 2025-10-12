@@ -5,19 +5,11 @@ import (
 	"strings"
 
 	"eka-dev.cloud/transaction-service/config"
+	"eka-dev.cloud/transaction-service/utils/common"
 	"eka-dev.cloud/transaction-service/utils/response"
 	"github.com/gofiber/fiber/v2"
 	"github.com/golang-jwt/jwt/v5"
 )
-
-type Claims struct {
-	FullName string `json:"FullName"`
-	Email    string `json:"Email"`
-	UserId   int64  `json:"UserId"`
-	Type     string `json:"Type"`
-	Role     string `json:"Role"`
-	jwt.RegisteredClaims
-}
 
 var jwtKey = []byte(config.Config.SecretJwt)
 
@@ -30,13 +22,13 @@ func getTokenFromHeader(c *fiber.Ctx) string {
 	return token
 }
 
-func validateToken(c *fiber.Ctx) (*Claims, error) {
+func validateToken(c *fiber.Ctx) (*common.Claims, error) {
 	tokenString := getTokenFromHeader(c)
 	if tokenString == "" {
 		return nil, response.Unauthorized("Missing Token", nil)
 	}
 
-	claims := &Claims{}
+	claims := &common.Claims{}
 	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, response.Unauthorized("Unexpected signing method", nil)

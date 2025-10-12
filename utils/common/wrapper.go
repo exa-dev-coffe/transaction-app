@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"eka-dev.cloud/transaction-service/lib"
-	"eka-dev.cloud/transaction-service/middleware"
 	"eka-dev.cloud/transaction-service/utils/response"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/log"
@@ -221,9 +220,9 @@ func WithTransaction[P any](db *sqlx.DB, fn func(tx *sqlx.Tx, args P) error, arg
 	return nil
 }
 
-func GetClaimsFromLocals(c *fiber.Ctx) (*middleware.Claims, error) {
+func GetClaimsFromLocals(c *fiber.Ctx) (*Claims, error) {
 	user := c.Locals("user")
-	claims, ok := user.(*middleware.Claims)
+	claims, ok := user.(*Claims)
 	if !ok {
 		return nil, response.InternalServerError("Failed to get user from token", nil)
 	}
