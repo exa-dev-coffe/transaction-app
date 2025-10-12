@@ -34,5 +34,5 @@ jobs:
             docker pull ghcr.io/${{ github.repository_owner }}/transaction-service-coffe:latest
             docker stop transaction-service-coffe || true && docker rm transaction-service-coffe || true 
           
-            docker run --env-file /home/deploy/env_project/coffe/master_data_service/.env -d --name transaction-service-coffe --network coffe-net -p 8006:8006 --memory="512m" --cpus="1.0" --restart=on-failure:5 ghcr.io/${{ github.repository_owner }}/transaction-service-coffe:latest
+            docker run --env-file /home/deploy/env_project/coffe/transaction_service/.env -d --name transaction-service-coffe --network coffe-net -p 8006:8006 --memory="512m" --cpus="1.0" --restart=on-failure:5 ghcr.io/${{ github.repository_owner }}/transaction-service-coffe:latest
           EOF
