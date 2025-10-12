@@ -63,10 +63,10 @@ migrate -path db/migrations -database "postgres://username:password@localhost:54
 this list of functions is available:
 
 ```go
-go run cmd/migrate/main.go create create_users_table
-go run cmd/migrate/main.go up
-go run cmd/migrate/main.go down
-go run cmd/migrate/main.go force <version>
+go run.\cmd\migration\main.go create create_users_table
+go run.\cmd\migration\main.go up
+go run.\cmd\migration\main.go down
+go run.\cmd\migration\main.go force <version>
 ```
 
 

@@ -4,12 +4,25 @@ import (
 	"errors"
 	"fmt"
 	"mime/multipart"
+	"regexp"
 
 	"eka-dev.cloud/transaction-service/utils/response"
 	"github.com/go-playground/validator/v10"
+	"github.com/gofiber/fiber/v2/log"
 )
 
 var Validate = validator.New()
+
+func init() {
+	log.Info("Initializing validator and registering custom validations")
+	err := Validate.RegisterValidation("numeric", func(fl validator.FieldLevel) bool {
+		matched, _ := regexp.MatchString(`^[0-9]{6}$`, fl.Field().String())
+		return matched
+	})
+	if err != nil {
+		log.Fatal("Error registering numeric validation:", err)
+	}
+}
 
 func formatValidationError(err error) map[string]string {
 	errorsMap := make(map[string]string)

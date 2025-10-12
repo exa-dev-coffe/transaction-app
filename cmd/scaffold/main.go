@@ -22,12 +22,12 @@ type Repository interface {
 	// TODO: define repository methods
 }
 
-type {{.StructName}}Repository struct {
+type {{.StructNameLower}}Repository struct {
 	db *sqlx.DB
 }
 
 func New{{.StructName}}Repository(db *sqlx.DB) Repository {
-	return &{{.StructName}}Repository{db: db}
+	return &{{.StructNameLower}}Repository{db: db}
 }
 `,
 	"service.go": `package {{.Name}}
@@ -40,13 +40,13 @@ type Service interface {
 	// TODO: define service methods
 }
 
-type {{.StructName}}Service struct {
+type {{.StructNameLower}}Service struct {
 	repo Repository
 	db   *sqlx.DB
 }
 
 func New{{.StructName}}Service(repo Repository, db *sqlx.DB) Service {
-	return &{{.StructName}}Service{repo: repo, db: db}
+	return &{{.StructNameLower}}Service{repo: repo, db: db}
 }
 `,
 	"route.go": `package {{.Name}}
@@ -103,6 +103,7 @@ func main() {
 		}
 		content = strings.ReplaceAll(content, "{{.Name}}", name)
 		content = strings.ReplaceAll(content, "{{.StructName}}", structName)
+		content = strings.ReplaceAll(content, "{{.StructNameLower}}", name)
 
 		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 			log.Fatal(err)

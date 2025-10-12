@@ -1,0 +1,1 @@
+DROP TABLE IF EXISTS th_user_checkouts;

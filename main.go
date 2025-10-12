@@ -8,10 +8,7 @@ import (
 	_ "eka-dev.cloud/transaction-service/db"
 	_ "eka-dev.cloud/transaction-service/lib"
 	"eka-dev.cloud/transaction-service/middleware"
-	"eka-dev.cloud/transaction-service/modules/category"
-	"eka-dev.cloud/transaction-service/modules/menu"
-	"eka-dev.cloud/transaction-service/modules/table"
-	"eka-dev.cloud/transaction-service/modules/upload"
+	"eka-dev.cloud/transaction-service/modules/transaction"
 	"eka-dev.cloud/transaction-service/utils/response"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
@@ -39,7 +36,7 @@ func initiator() {
 	})
 
 	fiberApp.Use(logger.New(logger.Config{
-		Format:     "[${time}] ${ip} ${method} ${path} - ${status}\n",
+		Format:     "[${time}] ${ip} ${method} ${path} - ${status} (${latency})\n",
 		TimeFormat: "2006-01-02 15:04:05",
 		TimeZone:   "Asia/Jakarta",
 	}))
@@ -49,20 +46,14 @@ func initiator() {
 	})
 
 	fiberApp.Use(cors.New(cors.Config{
-		AllowOrigins: "*",
-		AllowHeaders: "Origin, Content-Type, Accept, Authorization",
+		AllowOrigins: config.Config.AllowedOrigins,
+		AllowHeaders: "Origin, Content-Type, Accept, Authorization, X-Timestamp, X-Signature",
 		AllowMethods: "GET, POST, PUT, DELETE, OPTIONS",
 	}))
 
 	// Initialize routes
-	// Categories
-	category.NewHandler(fiberApp, db.DB)
 	// Menus
-	menu.NewHandler(fiberApp, db.DB)
-	// Uploads
-	upload.NewHandler(fiberApp)
-	// Tables
-	table.NewHandler(fiberApp, db.DB)
+	transaction.NewHandler(fiberApp, db.DB)
 
 	fiberApp.All("*", func(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusNotFound).JSON(response.NotFound("Route not found", nil))

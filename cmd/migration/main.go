@@ -16,7 +16,7 @@ import (
 
 const (
 	migrationsDir = "db/migrations"
-	dbURL         = "postgres://root:password@localhost:10000/db_master_data?sslmode=disable"
+	dbURL         = "postgres://root:password@localhost:10000/transaction?sslmode=disable"
 )
 
 func main() {

@@ -1,0 +1,217 @@
+package transaction
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"net/url"
+	"time"
+
+	"eka-dev.cloud/transaction-service/config"
+	"eka-dev.cloud/transaction-service/utils"
+	"eka-dev.cloud/transaction-service/utils/response"
+	"github.com/gofiber/fiber/v2/log"
+	"github.com/jmoiron/sqlx"
+)
+
+type Service interface {
+	// TODO: define service methods
+	CreateTransaction(tx *sqlx.Tx, request CreateTransactionRequest) error
+}
+
+type transactionService struct {
+	repo Repository
+	db   *sqlx.DB
+}
+
+func NewTransactionService(repo Repository, db *sqlx.DB) Service {
+	return &transactionService{repo: repo, db: db}
+}
+
+func (s *transactionService) CreateTransaction(tx *sqlx.Tx, request CreateTransactionRequest) error {
+	// Convert menuIds slice to a comma-separated string
+	var ids string
+	for i, data := range request.Datas {
+		if i > 0 {
+			ids += ","
+		}
+		ids += fmt.Sprintf("%d", data.MenuID)
+	}
+	menus, err := getMenuByIds(ids, request.TableId)
+	if err != nil {
+		return err
+	}
+
+	if len(menus) != len(request.Datas) {
+		return response.BadRequest("No menus found for the given IDs", nil)
+	}
+
+	request.Total = calculateTotalPriceMenu(menus, &request)
+
+	err = paymentUseWallet(request.CreatedBy, request.Total, request.Pin)
+	if err != nil {
+		return err
+	}
+
+	id, err := s.repo.InsertThTransaction(tx, request)
+	if err != nil {
+		return err
+	}
+
+	for i := range request.Datas {
+		err = s.repo.InsertTdTransaction(tx, id, request.CreatedBy, request.Datas[i])
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func calculateTotalPriceMenu(menus []MenuResponse, request *CreateTransactionRequest) float64 {
+	var total float64
+	for _, menu := range menus {
+		for iD, data := range request.Datas {
+			if menu.Id == data.MenuID {
+				request.Datas[iD].Price = menu.Price
+				request.Datas[iD].Total = menu.Price * float64(data.Qty)
+				total += menu.Price * float64(data.Qty)
+			}
+		}
+	}
+
+	return total
+}
+
+func createSignature(params string, body string, timestamp string) (string, error) {
+
+	message := params + timestamp + body
+	log.Info("message: ", message)
+	signature, err := utils.GenerateHMAC(message)
+	if err != nil {
+		log.Error("Failed to generate HMAC:", err)
+		return "", response.InternalServerError("Internal Server Error", nil)
+	}
+
+	return signature, nil
+}
+
+func paymentUseWallet(userId int64, total float64, pin string) error {
+	// Implement the logic to check the user's wallet balance
+	urlWallet := fmt.Sprintf("%s/api/internal/pay", config.Config.ServiceWalletUrl)
+
+	// Create the request body
+	bodyRequest := PaymentRequest{
+		UserId: userId,
+		Amount: total,
+		Pin:    pin,
+	}
+
+	timestamp := time.Now().UTC().Format(time.RFC3339)
+
+	// Marshal ke JSON (sekali saja)
+	bodyBytes, err := json.Marshal(bodyRequest)
+	if err != nil {
+		return err
+	}
+
+	// Simpan versi string-nya untuk signature
+	bodyString := string(bodyBytes)
+
+	signature, err := createSignature("", bodyString, timestamp)
+
+	if err != nil {
+		return err
+	}
+
+	_, err = utils.InternalRequest(signature, timestamp, urlWallet, "POST", bytes.NewReader(bodyBytes))
+
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func getMenuByIds(ids string, tableId int64) ([]MenuResponse, error) {
+	urlMasterData := fmt.Sprintf("%s/api/internal/menus-table?ids=%s&tableId=%d", config.Config.ServiceMasterDataUrl, ids, tableId)
+
+	params := url.Values{}
+	params.Add("ids", ids)
+	params.Add("tableId", fmt.Sprintf("%d", tableId))
+
+	timestamp := time.Now().UTC().Format(time.RFC3339)
+
+	signature, err := createSignature(params.Encode(), "", timestamp)
+
+	if err != nil {
+		return nil, err
+	}
+
+	body, err := utils.InternalRequest(signature, timestamp, urlMasterData, "GET", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var menus InternalMenuResponse
+	err = json.Unmarshal(body, &menus)
+	if err != nil {
+		log.Error("Failed to unmarshal response body:", err)
+		return nil, response.InternalServerError("Internal Server Error", nil)
+	}
+
+	return menus.Data, nil
+}
+
+//func paymentUserBalance(total float64, userId int64) error {
+//	url := fmt.Sprintf("%s/api/internal/users/%d/decrease_balance", config.Config.ServiceUserUrl, userId)
+//
+//	bodyRequest := map[string]float64{"amount": total}
+//	bodyJson, err := json.Marshal(bodyRequest)
+//	if err != nil {
+//		log.Error("Failed to marshal body:", err)
+//		return response.InternalServerError("Internal Server Error", nil)
+//	}
+//
+//	timestamp := fmt.Sprintf("%d", time.Now().Unix())
+//
+//	message := timestamp + string(bodyJson)
+//
+//	signature, err := utils.GenerateHMAC(message)
+//	if err != nil {
+//		log.Error("Failed to generate HMAC:", err)
+//		return response.InternalServerError("Internal Server Error", nil)
+//	}
+//
+//	}
+
+//
+//unc sendInternalRequest() error {
+//secret := "MY_SUPER_SECRET"
+//url := "http://service-b.internal/api/process"
+//
+//body := []byte(`{"action":"update_balance"}`)
+//timestamp := fmt.Sprintf("%d", time.Now().Unix())
+//
+//message := timestamp + string(body)
+//signature := auth.GenerateHMAC(secret, message)
+//
+//req, err := http.NewRequest("POST", url, bytes.NewBuffer(body))
+//if err != nil {
+//return err
+//}
+//
+//req.Header.Set("Content-Type", "application/json")
+//req.Header.Set("X-Timestamp", timestamp)
+//req.Header.Set("X-Signature", signature)
+//
+//client := &http.Client{Timeout: 5 * time.Second}
+//res, err := client.Do(req)
+//if err != nil {
+//return err
+//}
+//defer res.Body.Close()
+//
+//fmt.Println("Status:", res.Status)
+//return nil
+//}

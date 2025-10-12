@@ -66,3 +66,7 @@ func InternalServerError(message string, data interface{}) *AppError {
 		return NewAppError(http.StatusInternalServerError, message, data)
 	}
 }
+
+func CustomError(code int, message string, data interface{}) *AppError {
+	return NewAppError(code, message, data)
+}
