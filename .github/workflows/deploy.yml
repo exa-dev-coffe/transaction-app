@@ -1,4 +1,4 @@
-name: Build & Deploy Master Data Service to VPS via GHCR
+name: Build & Deploy Transaction Service to VPS via GHCR
 
 on:
   push:
@@ -17,10 +17,10 @@ jobs:
 
       - name: Build Docker image
         run: |
-          docker build -t ghcr.io/${{ github.repository_owner }}/master-data-service-coffe:latest .
+          docker build -t ghcr.io/${{ github.repository_owner }}/transaction-service-coffe:latest .
 
       - name: Push Docker image to GHCR
-        run: docker push ghcr.io/${{ github.repository_owner }}/master-data-service-coffe:latest
+        run: docker push ghcr.io/${{ github.repository_owner }}/transaction-service-coffe:latest
 
       - name: Deploy to VPS
         run: |
@@ -31,8 +31,8 @@ jobs:
           
           ssh -p 31086 -i ~/.ssh/id_ed25519 deploy@${{ secrets.VPS_HOST }} << 'EOF'
             docker login ghcr.io -u ${{ github.repository_owner }} -p '${{ secrets.GHCR_TOKEN }}'
-            docker pull ghcr.io/${{ github.repository_owner }}/master-data-service-coffe:latest
-            docker stop master-data-service-coffe || true && docker rm master-data-service-coffe || true 
+            docker pull ghcr.io/${{ github.repository_owner }}/transaction-service-coffe:latest
+            docker stop transaction-service-coffe || true && docker rm transaction-service-coffe || true 
           
-            docker run --env-file /home/deploy/env_project/coffe/master_data_service/.env -d --name master-data-service-coffe --network coffe-net -p 8001:8001 --memory="512m" --cpus="1.0" --restart=on-failure:5 ghcr.io/${{ github.repository_owner }}/master-data-service-coffe:latest
+            docker run --env-file /home/deploy/env_project/coffe/master_data_service/.env -d --name transaction-service-coffe --network coffe-net -p 8006:8006 --memory="512m" --cpus="1.0" --restart=on-failure:5 ghcr.io/${{ github.repository_owner }}/transaction-service-coffe:latest
           EOF
