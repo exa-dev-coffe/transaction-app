@@ -21,6 +21,7 @@ type Service interface {
 	CreateTransaction(tx *sqlx.Tx, request CreateTransactionRequest) error
 	GetListTransactionsPagination(request common.ParamsListRequest) (*response.Pagination[[]TransactionResponse], error)
 	GetListTransactionsNoPagination(request common.ParamsListRequest) ([]TransactionResponse, error)
+	GetOneTransaction(request *common.OneRequest) (*TransactionResponse, error)
 }
 
 type transactionService struct {
@@ -138,7 +139,14 @@ func (s *transactionService) GetListTransactionsNoPagination(request common.Para
 	}
 
 	menuIds := []string{}
+	tableIds := []string{}
 	for _, data := range res {
+		tableIdStr := utils.Int64ToString(data.TableId)
+
+		if data.TableId != 0 && !strings.Contains(strings.Join(tableIds, ","), tableIdStr) {
+			tableIds = append(tableIds, tableIdStr)
+		}
+
 		for _, detail := range data.Details {
 			menuIdStr := utils.IntToString(detail.MenuId)
 			if detail.MenuId != 0 && !strings.Contains(strings.Join(menuIds, ","), menuIdStr) {
@@ -148,15 +156,6 @@ func (s *transactionService) GetListTransactionsNoPagination(request common.Para
 	}
 
 	menuIdsStr := strings.Join(menuIds, ",")
-
-	tableIds := []string{}
-	for _, data := range res {
-		tableIdStr := utils.Int64ToString(data.TableId)
-		if data.TableId != 0 && !strings.Contains(strings.Join(tableIds, ","), tableIdStr) {
-			tableIds = append(tableIds, tableIdStr)
-		}
-	}
-
 	tableIdsStr := strings.Join(tableIds, ",")
 
 	if menuIdsStr != "" && tableIdsStr != "" {
@@ -184,8 +183,50 @@ func (s *transactionService) GetListTransactionsNoPagination(request common.Para
 			}
 
 		}
-
 	}
+
+	return res, nil
+}
+
+func (s *transactionService) GetOneTransaction(request *common.OneRequest) (*TransactionResponse, error) {
+	res, err := s.repo.GetOneTransaction(request.Id)
+	if err != nil {
+		return nil, err
+	}
+
+	menuIds := []string{}
+	tableIdStr := utils.Int64ToString(res.TableId)
+
+	for _, detail := range res.Details {
+		menuIdStr := utils.IntToString(detail.MenuId)
+		if detail.MenuId != 0 && !strings.Contains(strings.Join(menuIds, ","), menuIdStr) {
+			menuIds = append(menuIds, menuIdStr)
+		}
+	}
+
+	menuIdsStr := strings.Join(menuIds, ",")
+
+	if menuIdsStr != "" && tableIdStr != "" {
+		dataMenusAndTable, err := getDataMenuByIdsAbdTable(menuIdsStr, tableIdStr)
+		if err != nil {
+			return nil, err
+		}
+
+		for idDataDetail, dataDetail := range res.Details {
+			for _, menu := range dataMenusAndTable.Menus {
+				if dataDetail.MenuId == menu.Id {
+					res.Details[idDataDetail].MenuName = menu.Name
+					res.Details[idDataDetail].Photo = menu.Photo
+					res.Details[idDataDetail].Description = menu.Description
+					break
+				}
+			}
+		}
+		if res.TableId == dataMenusAndTable.Tables[0].Id {
+			res.TableName = dataMenusAndTable.Tables[0].Name
+		}
+	}
+
 	return res, nil
 }
 

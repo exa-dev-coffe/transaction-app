@@ -1,6 +1,9 @@
 package transaction
 
 import (
+	"database/sql"
+	"errors"
+
 	"eka-dev.cloud/transaction-service/utils/common"
 	"eka-dev.cloud/transaction-service/utils/response"
 	"github.com/gofiber/fiber/v2/log"
@@ -13,6 +16,7 @@ type Repository interface {
 	InsertTdTransaction(tx *sqlx.Tx, transactionId int, createdBy int64, data Data) error
 	GetListTransactionsPagination(params common.ParamsListRequest) (*response.Pagination[[]TransactionResponse], error)
 	GetListTransactionsNoPagination(request common.ParamsListRequest) ([]TransactionResponse, error)
+	GetOneTransaction(id int) (*TransactionResponse, error)
 }
 
 type transactionRepository struct {
@@ -140,4 +144,20 @@ func (r *transactionRepository) GetListTransactionsNoPagination(request common.P
 	}
 
 	return record, nil
+}
+
+func (r *transactionRepository) GetOneTransaction(id int) (*TransactionResponse, error) {
+	var record TransactionResponse
+	query := baseQuery + " WHERE t.id = $1 GROUP BY t.id "
+
+	err := r.db.Get(&record, query, id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, response.NotFound("Transaction not found", nil)
+		}
+		log.Error("Failed to get transaction by ID:", err)
+		return nil, response.InternalServerError("Failed to get transaction by ID", nil)
+	}
+
+	return &record, nil
 }

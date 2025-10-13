@@ -14,6 +14,7 @@ type Handler interface {
 	// TODO: define handler methods
 	CreateTransaction(c *fiber.Ctx) error
 	GetListTransactions(c *fiber.Ctx) error
+	GetOneTransaction(c *fiber.Ctx) error
 }
 
 type handler struct {
@@ -29,6 +30,8 @@ func NewHandler(app *fiber.App, db *sqlx.DB) Handler {
 	routes := app.Group("/api/1.0/transactions")
 	routes.Post("/create", middleware.RequireAuth, h.CreateTransaction)
 	routes.Get("/", middleware.RequireAuth, h.GetListTransactions)
+	routes.Get("/detail", middleware.RequireAuth, h.GetOneTransaction)
+
 	// routes.Get("", h.GetSomething)
 
 	return h
@@ -87,4 +90,19 @@ func (h *handler) GetListTransactions(c *fiber.Ctx) error {
 	}
 
 	return c.Status(fiber.StatusOK).JSON(response.Success("Success", records))
+}
+
+func (h *handler) GetOneTransaction(c *fiber.Ctx) error {
+	// Parse path parameter
+	request, err := common.GetOneDataRequest(c)
+	if err != nil {
+		return err
+	}
+
+	menu, err := h.service.GetOneTransaction(request)
+	if err != nil {
+		return err
+	}
+
+	return c.Status(fiber.StatusOK).JSON(response.Success("Success", menu))
 }
