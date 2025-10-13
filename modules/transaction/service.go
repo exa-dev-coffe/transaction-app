@@ -207,7 +207,6 @@ func calculateTotalPriceMenu(menus []MenuResponse, request *CreateTransactionReq
 func createSignature(params string, body string, timestamp string) (string, error) {
 
 	message := params + timestamp + body
-	log.Info("message: ", message)
 	signature, err := utils.GenerateHMAC(message)
 	if err != nil {
 		log.Error("Failed to generate HMAC:", err)

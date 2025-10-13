@@ -117,7 +117,6 @@ func (r *transactionRepository) GetListTransactionsNoPagination(request common.P
 
 	finalQuery, args := common.BuildFilterQuery(baseQuery, request, &mappingFiedType, " GROUP BY t.id ")
 
-	log.Info(finalQuery, args)
 	rows, err := r.db.NamedQuery(finalQuery, args)
 	if err != nil {
 		log.Error("Failed to get list transaction:", err)
