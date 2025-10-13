@@ -22,6 +22,8 @@ type Service interface {
 	GetListTransactionsPagination(request common.ParamsListRequest) (*response.Pagination[[]TransactionResponse], error)
 	GetListTransactionsNoPagination(request common.ParamsListRequest) ([]TransactionResponse, error)
 	GetOneTransaction(request *common.OneRequest) (*TransactionResponse, error)
+	GetListTransactionsByUserId(request common.ParamsListRequest, userId int64) (*response.Pagination[[]TransactionResponse], error)
+	GetOneTransactionByUserId(request *common.OneRequest, userId int64) (*TransactionResponse, error)
 }
 
 type transactionService struct {
@@ -102,7 +104,7 @@ func (s *transactionService) GetListTransactionsPagination(request common.Params
 	tableIdsStr := strings.Join(tableIds, ",")
 
 	if menuIdsStr != "" && tableIdsStr != "" {
-		dataMenusAndTable, err := getDataMenuByIdsAbdTable(menuIdsStr, tableIdsStr)
+		dataMenusAndTable, err := getDataMenuByIdsAndTable(menuIdsStr, tableIdsStr)
 		if err != nil {
 			return nil, err
 		}
@@ -118,11 +120,11 @@ func (s *transactionService) GetListTransactionsPagination(request common.Params
 						break
 					}
 				}
-				for _, table := range dataMenusAndTable.Tables {
-					if data.TableId == table.Id {
-						res.Data[i].TableName = table.Name
-						break
-					}
+			}
+			for _, table := range dataMenusAndTable.Tables {
+				if data.TableId == table.Id {
+					res.Data[i].TableName = table.Name
+					break
 				}
 			}
 
@@ -159,7 +161,7 @@ func (s *transactionService) GetListTransactionsNoPagination(request common.Para
 	tableIdsStr := strings.Join(tableIds, ",")
 
 	if menuIdsStr != "" && tableIdsStr != "" {
-		dataMenusAndTable, err := getDataMenuByIdsAbdTable(menuIdsStr, tableIdsStr)
+		dataMenusAndTable, err := getDataMenuByIdsAndTable(menuIdsStr, tableIdsStr)
 		if err != nil {
 			return nil, err
 		}
@@ -174,11 +176,11 @@ func (s *transactionService) GetListTransactionsNoPagination(request common.Para
 						break
 					}
 				}
-				for _, table := range dataMenusAndTable.Tables {
-					if data.TableId == table.Id {
-						res[i].TableName = table.Name
-						break
-					}
+			}
+			for _, table := range dataMenusAndTable.Tables {
+				if data.TableId == table.Id {
+					res[i].TableName = table.Name
+					break
 				}
 			}
 
@@ -207,7 +209,7 @@ func (s *transactionService) GetOneTransaction(request *common.OneRequest) (*Tra
 	menuIdsStr := strings.Join(menuIds, ",")
 
 	if menuIdsStr != "" && tableIdStr != "" {
-		dataMenusAndTable, err := getDataMenuByIdsAbdTable(menuIdsStr, tableIdStr)
+		dataMenusAndTable, err := getDataMenuByIdsAndTable(menuIdsStr, tableIdStr)
 		if err != nil {
 			return nil, err
 		}
@@ -224,6 +226,61 @@ func (s *transactionService) GetOneTransaction(request *common.OneRequest) (*Tra
 		}
 		if res.TableId == dataMenusAndTable.Tables[0].Id {
 			res.TableName = dataMenusAndTable.Tables[0].Name
+		}
+	}
+
+	return res, nil
+}
+
+func (s *transactionService) GetListTransactionsByUserId(request common.ParamsListRequest, userId int64) (*response.Pagination[[]TransactionResponse], error) {
+	res, err := s.repo.GetListTransactionsByUserId(request, userId)
+	if err != nil {
+		return nil, err
+	}
+
+	menuIds := []string{}
+	tableIds := []string{}
+	for _, data := range res.Data {
+		tableIdStr := utils.Int64ToString(data.TableId)
+
+		if data.TableId != 0 && !strings.Contains(strings.Join(tableIds, ","), tableIdStr) {
+			tableIds = append(tableIds, tableIdStr)
+		}
+
+		for _, detail := range data.Details {
+			menuIdStr := utils.IntToString(detail.MenuId)
+			if detail.MenuId != 0 && !strings.Contains(strings.Join(menuIds, ","), menuIdStr) {
+				menuIds = append(menuIds, menuIdStr)
+			}
+		}
+	}
+
+	menuIdsStr := strings.Join(menuIds, ",")
+	tableIdsStr := strings.Join(tableIds, ",")
+	if menuIdsStr != "" && tableIdsStr != "" {
+		dataMenusAndTable, err := getDataMenuByIdsAndTable(menuIdsStr, tableIdsStr)
+		if err != nil {
+			return nil, err
+		}
+
+		for i, data := range res.Data {
+			for idDataDetail, dataDetail := range data.Details {
+				for _, menu := range dataMenusAndTable.Menus {
+					if dataDetail.MenuId == menu.Id {
+						res.Data[i].Details[idDataDetail].MenuName = menu.Name
+						res.Data[i].Details[idDataDetail].Photo = menu.Photo
+						res.Data[i].Details[idDataDetail].Description = menu.Description
+						break
+					}
+				}
+			}
+			for _, table := range dataMenusAndTable.Tables {
+				if data.TableId == table.Id {
+					res.Data[i].TableName = table.Name
+					break
+				}
+			}
+
 		}
 	}
 
@@ -324,7 +381,7 @@ func getAvailableMenuByIdsAndTableById(ids string, tableId int64) ([]MenuRespons
 	return menus.Data, nil
 }
 
-func getDataMenuByIdsAbdTable(ids string, tableIds string) (GetMenusAndTableResponse, error) {
+func getDataMenuByIdsAndTable(ids string, tableIds string) (GetMenusAndTableResponse, error) {
 	urlMasterData := fmt.Sprintf("%s/api/internal/data-menus-table?ids=%s&tableIds=%s", config.Config.ServiceMasterDataUrl, ids, tableIds)
 
 	params := url.Values{}
@@ -354,55 +411,44 @@ func getDataMenuByIdsAbdTable(ids string, tableIds string) (GetMenusAndTableResp
 	return data.Data, nil
 }
 
-//func paymentUserBalance(total float64, userId int64) error {
-//	url := fmt.Sprintf("%s/api/internal/users/%d/decrease_balance", config.Config.ServiceUserUrl, userId)
-//
-//	bodyRequest := map[string]float64{"amount": total}
-//	bodyJson, err := json.Marshal(bodyRequest)
-//	if err != nil {
-//		log.Error("Failed to marshal body:", err)
-//		return response.InternalServerError("Internal Server Error", nil)
-//	}
-//
-//	timestamp := fmt.Sprintf("%d", time.Now().Unix())
-//
-//	message := timestamp + string(bodyJson)
-//
-//	signature, err := utils.GenerateHMAC(message)
-//	if err != nil {
-//		log.Error("Failed to generate HMAC:", err)
-//		return response.InternalServerError("Internal Server Error", nil)
-//	}
-//
-//	}
+func (s *transactionService) GetOneTransactionByUserId(request *common.OneRequest, userId int64) (*TransactionResponse, error) {
+	res, err := s.repo.GetOneTransactionByUserId(request.Id, userId)
+	if err != nil {
+		return nil, err
+	}
 
-//
-//unc sendInternalRequest() error {
-//secret := "MY_SUPER_SECRET"
-//url := "http://service-b.internal/api/process"
-//
-//body := []byte(`{"action":"update_balance"}`)
-//timestamp := fmt.Sprintf("%d", time.Now().Unix())
-//
-//message := timestamp + string(body)
-//signature := auth.GenerateHMAC(secret, message)
-//
-//req, err := http.NewRequest("POST", url, bytes.NewBuffer(body))
-//if err != nil {
-//return err
-//}
-//
-//req.Header.Set("Content-Type", "application/json")
-//req.Header.Set("X-Timestamp", timestamp)
-//req.Header.Set("X-Signature", signature)
-//
-//client := &http.Client{Timeout: 5 * time.Second}
-//res, err := client.Do(req)
-//if err != nil {
-//return err
-//}
-//defer res.Body.Close()
-//
-//fmt.Println("Status:", res.Status)
-//return nil
-//}
+	menuIds := []string{}
+	tableIdStr := utils.Int64ToString(res.TableId)
+
+	for _, detail := range res.Details {
+		menuIdStr := utils.IntToString(detail.MenuId)
+		if detail.MenuId != 0 && !strings.Contains(strings.Join(menuIds, ","), menuIdStr) {
+			menuIds = append(menuIds, menuIdStr)
+		}
+	}
+
+	menuIdsStr := strings.Join(menuIds, ",")
+
+	if menuIdsStr != "" && tableIdStr != "" {
+		dataMenusAndTable, err := getDataMenuByIdsAndTable(menuIdsStr, tableIdStr)
+		if err != nil {
+			return nil, err
+		}
+
+		for idDataDetail, dataDetail := range res.Details {
+			for _, menu := range dataMenusAndTable.Menus {
+				if dataDetail.MenuId == menu.Id {
+					res.Details[idDataDetail].MenuName = menu.Name
+					res.Details[idDataDetail].Photo = menu.Photo
+					res.Details[idDataDetail].Description = menu.Description
+					break
+				}
+			}
+		}
+		if res.TableId == dataMenusAndTable.Tables[0].Id {
+			res.TableName = dataMenusAndTable.Tables[0].Name
+		}
+	}
+
+	return res, nil
+}

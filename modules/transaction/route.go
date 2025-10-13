@@ -15,6 +15,8 @@ type Handler interface {
 	CreateTransaction(c *fiber.Ctx) error
 	GetListTransactions(c *fiber.Ctx) error
 	GetOneTransaction(c *fiber.Ctx) error
+	GetListTransactionsByUserId(c *fiber.Ctx) error
+	GetOneTransactionByUserId(c *fiber.Ctx) error
 }
 
 type handler struct {
@@ -27,10 +29,12 @@ func NewHandler(app *fiber.App, db *sqlx.DB) Handler {
 	service := NewTransactionService(repo, db)
 	h := &handler{service: service, db: db}
 
-	routes := app.Group("/api/1.0/transactions")
-	routes.Post("/create", middleware.RequireAuth, h.CreateTransaction)
-	routes.Get("/", middleware.RequireAuth, h.GetListTransactions)
-	routes.Get("/detail", middleware.RequireAuth, h.GetOneTransaction)
+	routes := app.Group("/api/1.0")
+	routes.Post("/checkout", middleware.RequireAuth, h.CreateTransaction)
+	routes.Get("/transactions", middleware.RequireRole("admin", "barista"), h.GetListTransactions)
+	routes.Get("/transactions/detail", middleware.RequireRole("admin", "barista"), h.GetOneTransaction)
+	routes.Get("/history-checkouts", middleware.RequireAuth, h.GetListTransactionsByUserId)
+	routes.Get("/history-checkouts/detail", middleware.RequireAuth, h.GetOneTransactionByUserId)
 
 	// routes.Get("", h.GetSomething)
 
@@ -99,10 +103,56 @@ func (h *handler) GetOneTransaction(c *fiber.Ctx) error {
 		return err
 	}
 
-	menu, err := h.service.GetOneTransaction(request)
+	record, err := h.service.GetOneTransaction(request)
 	if err != nil {
 		return err
 	}
 
-	return c.Status(fiber.StatusOK).JSON(response.Success("Success", menu))
+	return c.Status(fiber.StatusOK).JSON(response.Success("Success", record))
+}
+
+func (h *handler) GetListTransactionsByUserId(c *fiber.Ctx) error {
+	// Parse query parameters
+	queryParams := c.Queries()
+	var paramsListRequest common.ParamsListRequest
+	if err := common.ParseQueryParams(queryParams, &paramsListRequest); err != nil {
+		return err
+	}
+
+	err := lib.ValidateRequest(paramsListRequest)
+	if err != nil {
+		return err
+	}
+
+	claims, err := common.GetClaimsFromLocals(c)
+	if err != nil {
+		return err
+	}
+
+	records, err := h.service.GetListTransactionsByUserId(paramsListRequest, claims.UserId)
+	if err != nil {
+		return err
+	}
+
+	return c.Status(fiber.StatusOK).JSON(response.Success("Success", records))
+}
+
+func (h *handler) GetOneTransactionByUserId(c *fiber.Ctx) error {
+	// Parse path parameter
+	request, err := common.GetOneDataRequest(c)
+	if err != nil {
+		return err
+	}
+
+	claims, err := common.GetClaimsFromLocals(c)
+	if err != nil {
+		return err
+	}
+
+	record, err := h.service.GetOneTransactionByUserId(request, claims.UserId)
+	if err != nil {
+		return err
+	}
+
+	return c.Status(fiber.StatusOK).JSON(response.Success("Success", record))
 }

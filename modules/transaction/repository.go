@@ -17,6 +17,8 @@ type Repository interface {
 	GetListTransactionsPagination(params common.ParamsListRequest) (*response.Pagination[[]TransactionResponse], error)
 	GetListTransactionsNoPagination(request common.ParamsListRequest) ([]TransactionResponse, error)
 	GetOneTransaction(id int) (*TransactionResponse, error)
+	GetListTransactionsByUserId(params common.ParamsListRequest, userId int64) (*response.Pagination[[]TransactionResponse], error)
+	GetOneTransactionByUserId(id int, userId int64) (*TransactionResponse, error)
 }
 
 type transactionRepository struct {
@@ -151,6 +153,92 @@ func (r *transactionRepository) GetOneTransaction(id int) (*TransactionResponse,
 	query := baseQuery + " WHERE t.id = $1 GROUP BY t.id "
 
 	err := r.db.Get(&record, query, id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, response.NotFound("Transaction not found", nil)
+		}
+		log.Error("Failed to get transaction by ID:", err)
+		return nil, response.InternalServerError("Failed to get transaction by ID", nil)
+	}
+
+	return &record, nil
+}
+
+func (r *transactionRepository) GetListTransactionsByUserId(params common.ParamsListRequest, userId int64) (*response.Pagination[[]TransactionResponse], error) {
+	var record = make([]TransactionResponse, 0)
+
+	common.BuildMappingField(params, &mappingFieds)
+
+	finalQuery, args := common.BuildFilterQuery(baseQuery+" WHERE t.user_id = :user_id ", params, &mappingFiedType, " GROUP BY t.id ")
+
+	args["user_id"] = userId
+
+	rows, err := r.db.NamedQuery(finalQuery, args)
+
+	if err != nil {
+		log.Error("Failed to get list transaction:", err)
+		return nil, response.InternalServerError("Failed to get list transaction", nil)
+	}
+	defer func(rows *sqlx.Rows) {
+		err := rows.Close()
+		if err != nil {
+			log.Error("failed to close rows:", err)
+			return
+		}
+	}(rows)
+
+	for rows.Next() {
+		var transaction TransactionResponse
+		if err := rows.StructScan(&transaction); err != nil {
+			log.Error("Failed to scan transaction:", err)
+			return nil, response.InternalServerError("Failed to scan transaction", nil)
+		}
+		record = append(record, transaction)
+	}
+
+	var totalData int
+	countFinalQuery, countArgs := common.BuildCountQuery("SELECT COUNT(id) FROM th_user_checkouts WHERE user_id = :user_id ", params, &mappingFiedType)
+
+	countArgs["user_id"] = userId
+
+	countStmt, err := r.db.PrepareNamed(countFinalQuery)
+
+	if err != nil {
+		log.Error("Failed to prepare count query:", err)
+		return nil, response.InternalServerError("Failed to get list transaction count", nil)
+	}
+
+	defer func(countStmt *sqlx.NamedStmt) {
+		err := countStmt.Close()
+		if err != nil {
+			log.Error("failed to close count statement:", err)
+			return
+		}
+	}(countStmt)
+
+	if err := countStmt.Get(&totalData, countArgs); err != nil {
+		log.Error("Failed to get total data:", err)
+		return nil, response.InternalServerError("Failed to get list transaction count", nil)
+	}
+
+	pagination := response.Pagination[[]TransactionResponse]{
+		TotalData:   totalData,
+		Data:        record,
+		CurrentPage: params.Page,
+		PageSize:    params.Size,
+		TotalPages:  (totalData + params.Size - 1) / params.Size,
+		LastPage:    params.Page >= (totalData+params.Size-1)/params.Size,
+	}
+
+	return &pagination, nil
+
+}
+
+func (r *transactionRepository) GetOneTransactionByUserId(id int, userId int64) (*TransactionResponse, error) {
+	var record TransactionResponse
+	query := baseQuery + " WHERE t.id = $1 AND t.user_id = $2 GROUP BY t.id "
+
+	err := r.db.Get(&record, query, id, userId)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, response.NotFound("Transaction not found", nil)
