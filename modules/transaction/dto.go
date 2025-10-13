@@ -93,3 +93,8 @@ type TransactionDetail struct {
 	MenuName    string  `json:"menuName"`
 	Photo       string  `json:"photo" db:"photo"`
 }
+
+type UpdateOrderStatusRequest struct {
+	Id        int   `json:"id" validate:"required"`
+	UpdatedBy int64 `json:"updatedBy"`
+}

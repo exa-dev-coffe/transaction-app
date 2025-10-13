@@ -19,6 +19,7 @@ type Repository interface {
 	GetOneTransaction(id int) (*TransactionResponse, error)
 	GetListTransactionsByUserId(params common.ParamsListRequest, userId int64) (*response.Pagination[[]TransactionResponse], error)
 	GetOneTransactionByUserId(id int, userId int64) (*TransactionResponse, error)
+	UpdateOrderStatus(tx *sqlx.Tx, id int, updatedBy int64) error
 }
 
 type transactionRepository struct {
@@ -248,4 +249,34 @@ func (r *transactionRepository) GetOneTransactionByUserId(id int, userId int64) 
 	}
 
 	return &record, nil
+}
+
+func (r *transactionRepository) UpdateOrderStatus(tx *sqlx.Tx, id int, updatedBy int64) error {
+	query := `UPDATE th_user_checkouts SET order_status = order_status +1, updated_by = $1 WHERE id = $2 AND order_status  < 2`
+
+	result, err := tx.Exec(query, updatedBy, id)
+
+	if err != nil {
+		log.Error("Failed to update order status:", err)
+		return response.InternalServerError("Failed to update order status", nil)
+	}
+
+	err = validateAffectedRows(result)
+
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func validateAffectedRows(info sql.Result) error {
+	affected, err := common.GetInfoRowsAffected(info)
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return response.BadRequest("No rows were updated, possibly due to invalid ID or order status already at maximum", nil)
+	}
+	return nil
 }

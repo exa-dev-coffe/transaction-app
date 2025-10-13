@@ -24,6 +24,7 @@ type Service interface {
 	GetOneTransaction(request *common.OneRequest) (*TransactionResponse, error)
 	GetListTransactionsByUserId(request common.ParamsListRequest, userId int64) (*response.Pagination[[]TransactionResponse], error)
 	GetOneTransactionByUserId(request *common.OneRequest, userId int64) (*TransactionResponse, error)
+	UpdateOrderStatus(tx *sqlx.Tx, request UpdateOrderStatusRequest) error
 }
 
 type transactionService struct {
@@ -287,6 +288,57 @@ func (s *transactionService) GetListTransactionsByUserId(request common.ParamsLi
 	return res, nil
 }
 
+func (s *transactionService) GetOneTransactionByUserId(request *common.OneRequest, userId int64) (*TransactionResponse, error) {
+	res, err := s.repo.GetOneTransactionByUserId(request.Id, userId)
+	if err != nil {
+		return nil, err
+	}
+
+	menuIds := []string{}
+	tableIdStr := utils.Int64ToString(res.TableId)
+
+	for _, detail := range res.Details {
+		menuIdStr := utils.IntToString(detail.MenuId)
+		if detail.MenuId != 0 && !strings.Contains(strings.Join(menuIds, ","), menuIdStr) {
+			menuIds = append(menuIds, menuIdStr)
+		}
+	}
+
+	menuIdsStr := strings.Join(menuIds, ",")
+
+	if menuIdsStr != "" && tableIdStr != "" {
+		dataMenusAndTable, err := getDataMenuByIdsAndTable(menuIdsStr, tableIdStr)
+		if err != nil {
+			return nil, err
+		}
+
+		for idDataDetail, dataDetail := range res.Details {
+			for _, menu := range dataMenusAndTable.Menus {
+				if dataDetail.MenuId == menu.Id {
+					res.Details[idDataDetail].MenuName = menu.Name
+					res.Details[idDataDetail].Photo = menu.Photo
+					res.Details[idDataDetail].Description = menu.Description
+					break
+				}
+			}
+		}
+		if res.TableId == dataMenusAndTable.Tables[0].Id {
+			res.TableName = dataMenusAndTable.Tables[0].Name
+		}
+	}
+
+	return res, nil
+}
+
+func (s *transactionService) UpdateOrderStatus(tx *sqlx.Tx, request UpdateOrderStatusRequest) error {
+	err := s.repo.UpdateOrderStatus(tx, request.Id, request.UpdatedBy)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func calculateTotalPriceMenu(menus []MenuResponse, request *CreateTransactionRequest) float64 {
 	var total float64
 	for _, menu := range menus {
@@ -409,46 +461,4 @@ func getDataMenuByIdsAndTable(ids string, tableIds string) (GetMenusAndTableResp
 	}
 
 	return data.Data, nil
-}
-
-func (s *transactionService) GetOneTransactionByUserId(request *common.OneRequest, userId int64) (*TransactionResponse, error) {
-	res, err := s.repo.GetOneTransactionByUserId(request.Id, userId)
-	if err != nil {
-		return nil, err
-	}
-
-	menuIds := []string{}
-	tableIdStr := utils.Int64ToString(res.TableId)
-
-	for _, detail := range res.Details {
-		menuIdStr := utils.IntToString(detail.MenuId)
-		if detail.MenuId != 0 && !strings.Contains(strings.Join(menuIds, ","), menuIdStr) {
-			menuIds = append(menuIds, menuIdStr)
-		}
-	}
-
-	menuIdsStr := strings.Join(menuIds, ",")
-
-	if menuIdsStr != "" && tableIdStr != "" {
-		dataMenusAndTable, err := getDataMenuByIdsAndTable(menuIdsStr, tableIdStr)
-		if err != nil {
-			return nil, err
-		}
-
-		for idDataDetail, dataDetail := range res.Details {
-			for _, menu := range dataMenusAndTable.Menus {
-				if dataDetail.MenuId == menu.Id {
-					res.Details[idDataDetail].MenuName = menu.Name
-					res.Details[idDataDetail].Photo = menu.Photo
-					res.Details[idDataDetail].Description = menu.Description
-					break
-				}
-			}
-		}
-		if res.TableId == dataMenusAndTable.Tables[0].Id {
-			res.TableName = dataMenusAndTable.Tables[0].Name
-		}
-	}
-
-	return res, nil
 }
