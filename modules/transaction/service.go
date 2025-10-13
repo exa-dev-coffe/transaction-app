@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"strings"
 	"time"
 
 	"eka-dev.cloud/transaction-service/config"
 	"eka-dev.cloud/transaction-service/utils"
+	"eka-dev.cloud/transaction-service/utils/common"
 	"eka-dev.cloud/transaction-service/utils/response"
 	"github.com/gofiber/fiber/v2/log"
 	"github.com/jmoiron/sqlx"
@@ -17,6 +19,8 @@ import (
 type Service interface {
 	// TODO: define service methods
 	CreateTransaction(tx *sqlx.Tx, request CreateTransactionRequest) error
+	GetListTransactionsPagination(request common.ParamsListRequest) (*response.Pagination[[]TransactionResponse], error)
+	GetListTransactionsNoPagination(request common.ParamsListRequest) ([]TransactionResponse, error)
 }
 
 type transactionService struct {
@@ -37,7 +41,7 @@ func (s *transactionService) CreateTransaction(tx *sqlx.Tx, request CreateTransa
 		}
 		ids += fmt.Sprintf("%d", data.MenuID)
 	}
-	menus, err := getMenuByIds(ids, request.TableId)
+	menus, err := getAvailableMenuByIdsAndTableById(ids, request.TableId)
 	if err != nil {
 		return err
 	}
@@ -66,6 +70,123 @@ func (s *transactionService) CreateTransaction(tx *sqlx.Tx, request CreateTransa
 	}
 
 	return nil
+}
+
+func (s *transactionService) GetListTransactionsPagination(request common.ParamsListRequest) (*response.Pagination[[]TransactionResponse], error) {
+	res, err := s.repo.GetListTransactionsPagination(request)
+	if err != nil {
+		return nil, err
+	}
+
+	menuIds := []string{}
+	for _, data := range res.Data {
+		for _, detail := range data.Details {
+			menuIdStr := utils.IntToString(detail.MenuId)
+			if detail.MenuId != 0 && !strings.Contains(strings.Join(menuIds, ","), menuIdStr) {
+				menuIds = append(menuIds, menuIdStr)
+			}
+		}
+	}
+
+	menuIdsStr := strings.Join(menuIds, ",")
+
+	tableIds := []string{}
+	for _, data := range res.Data {
+		tableIdStr := utils.Int64ToString(data.TableId)
+		if data.TableId != 0 && !strings.Contains(strings.Join(tableIds, ","), tableIdStr) {
+			tableIds = append(tableIds, tableIdStr)
+		}
+	}
+
+	tableIdsStr := strings.Join(tableIds, ",")
+
+	if menuIdsStr != "" && tableIdsStr != "" {
+		dataMenusAndTable, err := getDataMenuByIdsAbdTable(menuIdsStr, tableIdsStr)
+		if err != nil {
+			return nil, err
+		}
+
+		for i, data := range res.Data {
+
+			for idDataDetail, dataDetail := range data.Details {
+				for _, menu := range dataMenusAndTable.Menus {
+					if dataDetail.MenuId == menu.Id {
+						res.Data[i].Details[idDataDetail].MenuName = menu.Name
+						res.Data[i].Details[idDataDetail].Photo = menu.Photo
+						res.Data[i].Details[idDataDetail].Description = menu.Description
+						break
+					}
+				}
+				for _, table := range dataMenusAndTable.Tables {
+					if data.TableId == table.Id {
+						res.Data[i].TableName = table.Name
+						break
+					}
+				}
+			}
+
+		}
+
+	}
+	return res, nil
+}
+
+func (s *transactionService) GetListTransactionsNoPagination(request common.ParamsListRequest) ([]TransactionResponse, error) {
+	res, err := s.repo.GetListTransactionsNoPagination(request)
+	if err != nil {
+		return nil, err
+	}
+
+	menuIds := []string{}
+	for _, data := range res {
+		for _, detail := range data.Details {
+			menuIdStr := utils.IntToString(detail.MenuId)
+			if detail.MenuId != 0 && !strings.Contains(strings.Join(menuIds, ","), menuIdStr) {
+				menuIds = append(menuIds, menuIdStr)
+			}
+		}
+	}
+
+	menuIdsStr := strings.Join(menuIds, ",")
+
+	tableIds := []string{}
+	for _, data := range res {
+		tableIdStr := utils.Int64ToString(data.TableId)
+		if data.TableId != 0 && !strings.Contains(strings.Join(tableIds, ","), tableIdStr) {
+			tableIds = append(tableIds, tableIdStr)
+		}
+	}
+
+	tableIdsStr := strings.Join(tableIds, ",")
+
+	if menuIdsStr != "" && tableIdsStr != "" {
+		dataMenusAndTable, err := getDataMenuByIdsAbdTable(menuIdsStr, tableIdsStr)
+		if err != nil {
+			return nil, err
+		}
+
+		for i, data := range res {
+			for idDataDetail, dataDetail := range data.Details {
+				for _, menu := range dataMenusAndTable.Menus {
+					if dataDetail.MenuId == menu.Id {
+						res[i].Details[idDataDetail].MenuName = menu.Name
+						res[i].Details[idDataDetail].Photo = menu.Photo
+						res[i].Details[idDataDetail].Description = menu.Description
+						break
+					}
+				}
+				for _, table := range dataMenusAndTable.Tables {
+					if data.TableId == table.Id {
+						res[i].TableName = table.Name
+						break
+					}
+				}
+			}
+
+		}
+
+	}
+	return res, nil
 }
 
 func calculateTotalPriceMenu(menus []MenuResponse, request *CreateTransactionRequest) float64 {
@@ -133,8 +254,8 @@ func paymentUseWallet(userId int64, total float64, pin string) error {
 	return nil
 }
 
-func getMenuByIds(ids string, tableId int64) ([]MenuResponse, error) {
-	urlMasterData := fmt.Sprintf("%s/api/internal/menus-table?ids=%s&tableId=%d", config.Config.ServiceMasterDataUrl, ids, tableId)
+func getAvailableMenuByIdsAndTableById(ids string, tableId int64) ([]MenuResponse, error) {
+	urlMasterData := fmt.Sprintf("%s/api/internal/available-menus-table?ids=%s&tableId=%d", config.Config.ServiceMasterDataUrl, ids, tableId)
 
 	params := url.Values{}
 	params.Add("ids", ids)
@@ -161,6 +282,36 @@ func getMenuByIds(ids string, tableId int64) ([]MenuResponse, error) {
 	}
 
 	return menus.Data, nil
+}
+
+func getDataMenuByIdsAbdTable(ids string, tableIds string) (GetMenusAndTableResponse, error) {
+	urlMasterData := fmt.Sprintf("%s/api/internal/data-menus-table?ids=%s&tableIds=%s", config.Config.ServiceMasterDataUrl, ids, tableIds)
+
+	params := url.Values{}
+	params.Add("ids", ids)
+	params.Add("tableIds", tableIds)
+
+	timestamp := time.Now().UTC().Format(time.RFC3339)
+
+	signature, err := createSignature(params.Encode(), "", timestamp)
+
+	if err != nil {
+		return GetMenusAndTableResponse{}, err
+	}
+
+	body, err := utils.InternalRequest(signature, timestamp, urlMasterData, "GET", nil)
+	if err != nil {
+		return GetMenusAndTableResponse{}, err
+	}
+
+	var data InternalGetMenusAndTableResponse
+	err = json.Unmarshal(body, &data)
+	if err != nil {
+		log.Error("Failed to unmarshal response body:", err)
+		return GetMenusAndTableResponse{}, response.InternalServerError("Internal Server Error", nil)
+	}
+
+	return data.Data, nil
 }
 
 //func paymentUserBalance(total float64, userId int64) error {
