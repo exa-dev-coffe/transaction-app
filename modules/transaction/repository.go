@@ -20,6 +20,7 @@ type Repository interface {
 	GetListTransactionsByUserId(params common.ParamsListRequest, userId int64) (*response.Pagination[[]TransactionResponse], error)
 	GetOneTransactionByUserId(id int, userId int64) (*TransactionResponse, error)
 	UpdateOrderStatus(tx *sqlx.Tx, id int, updatedBy int64) error
+	SetRatingMenu(tx *sqlx.Tx, id int, rating int, updatedBy int64) (int, error)
 }
 
 type transactionRepository struct {
@@ -261,7 +262,7 @@ func (r *transactionRepository) UpdateOrderStatus(tx *sqlx.Tx, id int, updatedBy
 		return response.InternalServerError("Failed to update order status", nil)
 	}
 
-	err = validateAffectedRows(result)
+	err = validateAffectedRows(result, "No rows were updated, possibly due to invalid ID or order status already at maximum")
 
 	if err != nil {
 		return err
@@ -270,13 +271,31 @@ func (r *transactionRepository) UpdateOrderStatus(tx *sqlx.Tx, id int, updatedBy
 	return nil
 }
 
-func validateAffectedRows(info sql.Result) error {
+func (r *transactionRepository) SetRatingMenu(tx *sqlx.Tx, id int, rating int, updatedBy int64) (int, error) {
+	query := `UPDATE td_user_checkouts SET rating = $1, updated_by = $2 WHERE id = $3 AND rating IS NULL RETURNING menu_id`
+
+	var menuId int
+
+	err := tx.QueryRow(query, rating, updatedBy, id).Scan(&menuId)
+
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, response.BadRequest("No rows were updated, possibly due to invalid ID or rating already set", nil)
+		}
+		log.Error("Failed to set rating:", err)
+		return 0, response.InternalServerError("Failed to set rating", nil)
+	}
+
+	return menuId, nil
+}
+
+func validateAffectedRows(info sql.Result, message string) error {
 	affected, err := common.GetInfoRowsAffected(info)
 	if err != nil {
 		return err
 	}
 	if affected == 0 {
-		return response.BadRequest("No rows were updated, possibly due to invalid ID or order status already at maximum", nil)
+		return response.BadRequest(message, nil)
 	}
 	return nil
 }

@@ -9,11 +9,13 @@ import (
 	"time"
 
 	"eka-dev.cloud/transaction-service/config"
+	"eka-dev.cloud/transaction-service/lib"
 	"eka-dev.cloud/transaction-service/utils"
 	"eka-dev.cloud/transaction-service/utils/common"
 	"eka-dev.cloud/transaction-service/utils/response"
 	"github.com/gofiber/fiber/v2/log"
 	"github.com/jmoiron/sqlx"
+	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 type Service interface {
@@ -25,6 +27,7 @@ type Service interface {
 	GetListTransactionsByUserId(request common.ParamsListRequest, userId int64) (*response.Pagination[[]TransactionResponse], error)
 	GetOneTransactionByUserId(request *common.OneRequest, userId int64) (*TransactionResponse, error)
 	UpdateOrderStatus(tx *sqlx.Tx, request UpdateOrderStatusRequest) error
+	SetRatingMenu(tx *sqlx.Tx, request SetRatingMenuRequest) error
 }
 
 type transactionService struct {
@@ -332,6 +335,29 @@ func (s *transactionService) GetOneTransactionByUserId(request *common.OneReques
 
 func (s *transactionService) UpdateOrderStatus(tx *sqlx.Tx, request UpdateOrderStatusRequest) error {
 	err := s.repo.UpdateOrderStatus(tx, request.Id, request.UpdatedBy)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *transactionService) SetRatingMenu(tx *sqlx.Tx, request SetRatingMenuRequest) error {
+	idMenu, err := s.repo.SetRatingMenu(tx, request.Id, request.Rating, request.UpdatedBy)
+	if err != nil {
+		return err
+	}
+
+	ch, err := lib.GetChannel()
+	if err != nil {
+		log.Error("Failed to get channel:", err)
+		return response.InternalServerError("Internal Server Error", nil)
+	}
+	payload := []byte(fmt.Sprintf(`{"id": %d, "rating": %d, "updatedBy": %d}`, idMenu, request.Rating, request.UpdatedBy))
+	err = lib.SendMessage(ch, "menu.set_rating", "menu.set_rating", "", lib.ExchangeDirect, amqp.Publishing{
+		ContentType: "application/json",
+		Body:        payload,
+	}, string(payload), true, false, false, amqp.Table{})
 	if err != nil {
 		return err
 	}

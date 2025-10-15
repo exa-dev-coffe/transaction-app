@@ -36,6 +36,7 @@ func NewHandler(app *fiber.App, db *sqlx.DB) Handler {
 	routes.Get("/history-checkouts", middleware.RequireAuth, h.GetListTransactionsByUserId)
 	routes.Get("/history-checkouts/detail", middleware.RequireAuth, h.GetOneTransactionByUserId)
 	routes.Patch("/transactions/update-order-status", middleware.RequireRole("admin", "barista"), h.UpdateOrderStatus)
+	routes.Patch("/history-checkouts/set-rating-menu", middleware.RequireAuth, h.SetRatingMenu)
 
 	// routes.Get("", h.GetSomething)
 
@@ -185,4 +186,33 @@ func (h *handler) UpdateOrderStatus(c *fiber.Ctx) error {
 	}
 
 	return c.Status(fiber.StatusOK).JSON(response.Success("Order status updated successfully", nil))
+}
+
+func (h *handler) SetRatingMenu(c *fiber.Ctx) error {
+	// Parse request body
+	var request SetRatingMenuRequest
+	if err := c.BodyParser(&request); err != nil {
+		log.Error("Failed to parse request body:", err)
+		return response.BadRequest("Invalid request body", nil)
+	}
+
+	err := lib.ValidateRequest(request)
+
+	if err != nil {
+		return err
+	}
+
+	claims, err := common.GetClaimsFromLocals(c)
+	if err != nil {
+		return err
+	}
+
+	request.UpdatedBy = claims.UserId
+
+	err = common.WithTransaction[SetRatingMenuRequest](h.db, h.service.SetRatingMenu, request)
+	if err != nil {
+		return err
+	}
+
+	return c.Status(fiber.StatusOK).JSON(response.Success("Set rating menu successfully", nil))
 }

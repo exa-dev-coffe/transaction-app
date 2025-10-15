@@ -98,3 +98,9 @@ type UpdateOrderStatusRequest struct {
 	Id        int   `json:"id" validate:"required"`
 	UpdatedBy int64 `json:"updatedBy"`
 }
+
+type SetRatingMenuRequest struct {
+	Id        int   `json:"id" validate:"required"`
+	Rating    int   `json:"rating" validate:"required,min=1,max=5"`
+	UpdatedBy int64 `json:"updatedBy"`
+}
