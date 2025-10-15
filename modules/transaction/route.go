@@ -12,6 +12,11 @@ import (
 
 type Handler interface {
 	// TODO: define handler methods
+	CreateTransaction(c *fiber.Ctx) error
+	GetListTransactions(c *fiber.Ctx) error
+	GetOneTransaction(c *fiber.Ctx) error
+	GetListTransactionsByUserId(c *fiber.Ctx) error
+	GetOneTransactionByUserId(c *fiber.Ctx) error
 }
 
 type handler struct {
@@ -24,8 +29,15 @@ func NewHandler(app *fiber.App, db *sqlx.DB) Handler {
 	service := NewTransactionService(repo, db)
 	h := &handler{service: service, db: db}
 
-	routes := app.Group("/api/1.0/transaction")
-	routes.Post("/create", middleware.RequireAuth, h.CreateTransaction)
+	routes := app.Group("/api/1.0")
+	routes.Post("/checkout", middleware.RequireAuth, h.CreateTransaction)
+	routes.Get("/transactions", middleware.RequireRole("admin", "barista"), h.GetListTransactions)
+	routes.Get("/transactions/detail", middleware.RequireRole("admin", "barista"), h.GetOneTransaction)
+	routes.Get("/history-checkouts", middleware.RequireAuth, h.GetListTransactionsByUserId)
+	routes.Get("/history-checkouts/detail", middleware.RequireAuth, h.GetOneTransactionByUserId)
+	routes.Patch("/transactions/update-order-status", middleware.RequireRole("admin", "barista"), h.UpdateOrderStatus)
+	routes.Patch("/history-checkouts/set-rating-menu", middleware.RequireAuth, h.SetRatingMenu)
+
 	// routes.Get("", h.GetSomething)
 
 	return h
@@ -58,4 +70,149 @@ func (h *handler) CreateTransaction(c *fiber.Ctx) error {
 	}
 
 	return c.Status(fiber.StatusCreated).JSON(response.Success("Transaction created successfully", nil))
+}
+
+func (h *handler) GetListTransactions(c *fiber.Ctx) error {
+	// Parse query parameters
+	queryParams := c.Queries()
+	var paramsListRequest common.ParamsListRequest
+	if err := common.ParseQueryParams(queryParams, &paramsListRequest); err != nil {
+		return err
+	}
+
+	err := lib.ValidateRequest(paramsListRequest)
+	if err != nil {
+		return err
+	}
+
+	var records interface{}
+	if paramsListRequest.NoPaginate {
+		records, err = h.service.GetListTransactionsNoPagination(paramsListRequest)
+	} else {
+		records, err = h.service.GetListTransactionsPagination(paramsListRequest)
+	}
+	if err != nil {
+		return err
+	}
+
+	return c.Status(fiber.StatusOK).JSON(response.Success("Success", records))
+}
+
+func (h *handler) GetOneTransaction(c *fiber.Ctx) error {
+	// Parse path parameter
+	request, err := common.GetOneDataRequest(c)
+	if err != nil {
+		return err
+	}
+
+	record, err := h.service.GetOneTransaction(request)
+	if err != nil {
+		return err
+	}
+
+	return c.Status(fiber.StatusOK).JSON(response.Success("Success", record))
+}
+
+func (h *handler) GetListTransactionsByUserId(c *fiber.Ctx) error {
+	// Parse query parameters
+	queryParams := c.Queries()
+	var paramsListRequest common.ParamsListRequest
+	if err := common.ParseQueryParams(queryParams, &paramsListRequest); err != nil {
+		return err
+	}
+
+	err := lib.ValidateRequest(paramsListRequest)
+	if err != nil {
+		return err
+	}
+
+	claims, err := common.GetClaimsFromLocals(c)
+	if err != nil {
+		return err
+	}
+
+	records, err := h.service.GetListTransactionsByUserId(paramsListRequest, claims.UserId)
+	if err != nil {
+		return err
+	}
+
+	return c.Status(fiber.StatusOK).JSON(response.Success("Success", records))
+}
+
+func (h *handler) GetOneTransactionByUserId(c *fiber.Ctx) error {
+	// Parse path parameter
+	request, err := common.GetOneDataRequest(c)
+	if err != nil {
+		return err
+	}
+
+	claims, err := common.GetClaimsFromLocals(c)
+	if err != nil {
+		return err
+	}
+
+	record, err := h.service.GetOneTransactionByUserId(request, claims.UserId)
+	if err != nil {
+		return err
+	}
+
+	return c.Status(fiber.StatusOK).JSON(response.Success("Success", record))
+}
+
+func (h *handler) UpdateOrderStatus(c *fiber.Ctx) error {
+	// Parse request body
+	var request UpdateOrderStatusRequest
+	if err := c.BodyParser(&request); err != nil {
+		log.Error("Failed to parse request body:", err)
+		return response.BadRequest("Invalid request body", nil)
+	}
+
+	err := lib.ValidateRequest(request)
+
+	if err != nil {
+		return err
+	}
+
+	claims, err := common.GetClaimsFromLocals(c)
+	if err != nil {
+		return err
+	}
+
+	request.UpdatedBy = claims.UserId
+
+	err = common.WithTransaction[UpdateOrderStatusRequest](h.db, h.service.UpdateOrderStatus, request)
+	if err != nil {
+		return err
+	}
+
+	return c.Status(fiber.StatusOK).JSON(response.Success("Order status updated successfully", nil))
+}
+
+func (h *handler) SetRatingMenu(c *fiber.Ctx) error {
+	// Parse request body
+	var request SetRatingMenuRequest
+	if err := c.BodyParser(&request); err != nil {
+		log.Error("Failed to parse request body:", err)
+		return response.BadRequest("Invalid request body", nil)
+	}
+
+	err := lib.ValidateRequest(request)
+
+	if err != nil {
+		return err
+	}
+
+	claims, err := common.GetClaimsFromLocals(c)
+	if err != nil {
+		return err
+	}
+
+	request.UpdatedBy = claims.UserId
+
+	err = common.WithTransaction[SetRatingMenuRequest](h.db, h.service.SetRatingMenu, request)
+	if err != nil {
+		return err
+	}
+
+	return c.Status(fiber.StatusOK).JSON(response.Success("Set rating menu successfully", nil))
 }

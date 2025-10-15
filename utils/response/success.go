@@ -9,13 +9,13 @@ type Response struct {
 	TimeStamp time.Time   `json:"timestamp"`
 }
 
-type Pagination struct {
-	Data        interface{} `json:"data"`
-	TotalData   int         `json:"totalData"`
-	TotalPages  int         `json:"totalPages"`
-	CurrentPage int         `json:"currentPage"`
-	PageSize    int         `json:"pageSize"`
-	LastPage    bool        `json:"lastPage"`
+type Pagination[T any] struct {
+	Data        T    `json:"data"`
+	TotalData   int  `json:"totalData"`
+	TotalPages  int  `json:"totalPages"`
+	CurrentPage int  `json:"currentPage"`
+	PageSize    int  `json:"pageSize"`
+	LastPage    bool `json:"lastPage"`
 }
 
 func Success(message string, data interface{}) Response {

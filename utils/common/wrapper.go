@@ -13,7 +13,7 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
-func BuildFilterQuery(baseQuery string, params ParamsListRequest, mappingFieldType *map[string]string) (string, map[string]interface{}) {
+func BuildFilterQuery(baseQuery string, params ParamsListRequest, mappingFieldType *map[string]string, groupByQuery string) (string, map[string]interface{}) {
 	// Implementation here
 	args := map[string]interface{}{}
 	filteredField := []string{}
@@ -68,6 +68,11 @@ func BuildFilterQuery(baseQuery string, params ParamsListRequest, mappingFieldTy
 			}
 		}
 	}
+
+	if groupByQuery != "" {
+		baseQuery += " " + groupByQuery + " "
+	}
+
 	if params.Sort.Order != "" && params.Sort.Field != "" {
 		baseQuery += fmt.Sprintf(" ORDER BY %s %s ", params.Sort.Field, strings.ToUpper(params.Sort.Order))
 	}
