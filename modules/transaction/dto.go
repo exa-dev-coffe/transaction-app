@@ -33,6 +33,14 @@ type TableResponse struct {
 	Name string `json:"name" db:"name"`
 }
 
+type InternalGetUserResponse struct {
+	Data []UserResponse `json:"data"`
+}
+type UserResponse struct {
+	UserId   int64  `json:"userId" `
+	FullName string `json:"fullName"`
+}
+
 type Data struct {
 	MenuID int     `json:"menuId" validate:"required"`
 	Qty    int     `json:"qty" validate:"required,gt=0"`
@@ -61,6 +69,8 @@ type TransactionResponse struct {
 	OrderStatus int8                    `json:"orderStatus" db:"order_status"`
 	TotalPrice  float64                 `json:"totalPrice" db:"total_price"`
 	OrderFor    string                  `json:"orderFor" db:"order_for"`
+	OrderBy     string                  `json:"orderBy"`
+	UserId      int64                   `json:"userId" db:"user_id"`
 	TableName   string                  `json:"tableName"`
 	CreatedAt   string                  `json:"createdAt" db:"created_at"`
 	UpdatedAt   string                  `json:"updatedAt" db:"updated_at"`

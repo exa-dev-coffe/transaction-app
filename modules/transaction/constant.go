@@ -6,6 +6,7 @@ SELECT
 	t.table_id,
 	t.total_price,
 	t.order_status,
+	t.user_id,
 	t.order_for,
 	t.created_at,
 	t.updated_at,

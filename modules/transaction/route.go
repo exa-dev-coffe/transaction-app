@@ -131,7 +131,7 @@ func (h *handler) GetListTransactionsByUserId(c *fiber.Ctx) error {
 		return err
 	}
 
-	records, err := h.service.GetListTransactionsByUserId(paramsListRequest, claims.UserId)
+	records, err := h.service.GetListTransactionsByUserId(paramsListRequest, claims.UserId, claims.FullName)
 	if err != nil {
 		return err
 	}
@@ -151,7 +151,7 @@ func (h *handler) GetOneTransactionByUserId(c *fiber.Ctx) error {
 		return err
 	}
 
-	record, err := h.service.GetOneTransactionByUserId(request, claims.UserId)
+	record, err := h.service.GetOneTransactionByUserId(request, claims.UserId, claims.FullName)
 	if err != nil {
 		return err
 	}

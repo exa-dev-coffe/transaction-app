@@ -24,8 +24,8 @@ type Service interface {
 	GetListTransactionsPagination(request common.ParamsListRequest) (*response.Pagination[[]TransactionResponse], error)
 	GetListTransactionsNoPagination(request common.ParamsListRequest) ([]TransactionResponse, error)
 	GetOneTransaction(request *common.OneRequest) (*TransactionResponse, error)
-	GetListTransactionsByUserId(request common.ParamsListRequest, userId int64) (*response.Pagination[[]TransactionResponse], error)
-	GetOneTransactionByUserId(request *common.OneRequest, userId int64) (*TransactionResponse, error)
+	GetListTransactionsByUserId(request common.ParamsListRequest, userId int64, name string) (*response.Pagination[[]TransactionResponse], error)
+	GetOneTransactionByUserId(request *common.OneRequest, userId int64, name string) (*TransactionResponse, error)
 	UpdateOrderStatus(tx *sqlx.Tx, request UpdateOrderStatusRequest) error
 	SetRatingMenu(tx *sqlx.Tx, request SetRatingMenuRequest) error
 }
@@ -86,7 +86,19 @@ func (s *transactionService) GetListTransactionsPagination(request common.Params
 	}
 
 	menuIds := []string{}
+	tableIds := []string{}
+	userIds := []string{}
 	for _, data := range res.Data {
+		tableIdStr := utils.Int64ToString(data.TableId)
+
+		if data.TableId != 0 && !strings.Contains(strings.Join(tableIds, ","), tableIdStr) {
+			tableIds = append(tableIds, tableIdStr)
+		}
+
+		if data.UserId != 0 && !strings.Contains(strings.Join(userIds, ","), utils.Int64ToString(data.UserId)) {
+			userIds = append(userIds, utils.Int64ToString(data.UserId))
+		}
+
 		for _, detail := range data.Details {
 			menuIdStr := utils.IntToString(detail.MenuId)
 			if detail.MenuId != 0 && !strings.Contains(strings.Join(menuIds, ","), menuIdStr) {
@@ -96,19 +108,15 @@ func (s *transactionService) GetListTransactionsPagination(request common.Params
 	}
 
 	menuIdsStr := strings.Join(menuIds, ",")
-
-	tableIds := []string{}
-	for _, data := range res.Data {
-		tableIdStr := utils.Int64ToString(data.TableId)
-		if data.TableId != 0 && !strings.Contains(strings.Join(tableIds, ","), tableIdStr) {
-			tableIds = append(tableIds, tableIdStr)
-		}
-	}
-
 	tableIdsStr := strings.Join(tableIds, ",")
+	userIdsStr := strings.Join(userIds, ",")
 
-	if menuIdsStr != "" && tableIdsStr != "" {
+	if menuIdsStr != "" && tableIdsStr != "" && userIdsStr != "" {
 		dataMenusAndTable, err := getDataMenuByIdsAndTable(menuIdsStr, tableIdsStr)
+		if err != nil {
+			return nil, err
+		}
+		dataUsers, err := getUsersNameByIds(userIdsStr)
 		if err != nil {
 			return nil, err
 		}
@@ -131,6 +139,12 @@ func (s *transactionService) GetListTransactionsPagination(request common.Params
 					break
 				}
 			}
+			for _, user := range dataUsers {
+				if data.UserId == user.UserId {
+					res.Data[i].OrderBy = user.FullName
+					break
+				}
+			}
 
 		}
 
@@ -146,11 +160,16 @@ func (s *transactionService) GetListTransactionsNoPagination(request common.Para
 
 	menuIds := []string{}
 	tableIds := []string{}
+	userIds := []string{}
 	for _, data := range res {
 		tableIdStr := utils.Int64ToString(data.TableId)
 
 		if data.TableId != 0 && !strings.Contains(strings.Join(tableIds, ","), tableIdStr) {
 			tableIds = append(tableIds, tableIdStr)
+		}
+
+		if data.UserId != 0 && !strings.Contains(strings.Join(userIds, ","), utils.Int64ToString(data.UserId)) {
+			userIds = append(userIds, utils.Int64ToString(data.UserId))
 		}
 
 		for _, detail := range data.Details {
@@ -163,9 +182,14 @@ func (s *transactionService) GetListTransactionsNoPagination(request common.Para
 
 	menuIdsStr := strings.Join(menuIds, ",")
 	tableIdsStr := strings.Join(tableIds, ",")
+	userIdsStr := strings.Join(userIds, ",")
 
-	if menuIdsStr != "" && tableIdsStr != "" {
+	if menuIdsStr != "" && tableIdsStr != "" && userIdsStr != "" {
 		dataMenusAndTable, err := getDataMenuByIdsAndTable(menuIdsStr, tableIdsStr)
+		if err != nil {
+			return nil, err
+		}
+		dataUsers, err := getUsersNameByIds(userIdsStr)
 		if err != nil {
 			return nil, err
 		}
@@ -188,6 +212,13 @@ func (s *transactionService) GetListTransactionsNoPagination(request common.Para
 				}
 			}
 
+			for _, user := range dataUsers {
+				if data.UserId == user.UserId {
+					res[i].OrderBy = user.FullName
+					break
+				}
+			}
+
 		}
 	}
 
@@ -202,6 +233,7 @@ func (s *transactionService) GetOneTransaction(request *common.OneRequest) (*Tra
 
 	menuIds := []string{}
 	tableIdStr := utils.Int64ToString(res.TableId)
+	userIdStr := utils.Int64ToString(res.UserId)
 
 	for _, detail := range res.Details {
 		menuIdStr := utils.IntToString(detail.MenuId)
@@ -212,8 +244,12 @@ func (s *transactionService) GetOneTransaction(request *common.OneRequest) (*Tra
 
 	menuIdsStr := strings.Join(menuIds, ",")
 
-	if menuIdsStr != "" && tableIdStr != "" {
+	if menuIdsStr != "" && tableIdStr != "" && userIdStr != "" {
 		dataMenusAndTable, err := getDataMenuByIdsAndTable(menuIdsStr, tableIdStr)
+		if err != nil {
+			return nil, err
+		}
+		dataUsers, err := getUsersNameByIds(userIdStr)
 		if err != nil {
 			return nil, err
 		}
@@ -231,12 +267,15 @@ func (s *transactionService) GetOneTransaction(request *common.OneRequest) (*Tra
 		if res.TableId == dataMenusAndTable.Tables[0].Id {
 			res.TableName = dataMenusAndTable.Tables[0].Name
 		}
+		if res.UserId == dataUsers[0].UserId {
+			res.OrderBy = dataUsers[0].FullName
+		}
 	}
 
 	return res, nil
 }
 
-func (s *transactionService) GetListTransactionsByUserId(request common.ParamsListRequest, userId int64) (*response.Pagination[[]TransactionResponse], error) {
+func (s *transactionService) GetListTransactionsByUserId(request common.ParamsListRequest, userId int64, name string) (*response.Pagination[[]TransactionResponse], error) {
 	res, err := s.repo.GetListTransactionsByUserId(request, userId)
 	if err != nil {
 		return nil, err
@@ -285,13 +324,14 @@ func (s *transactionService) GetListTransactionsByUserId(request common.ParamsLi
 				}
 			}
 
+			res.Data[i].OrderBy = name
 		}
 	}
 
 	return res, nil
 }
 
-func (s *transactionService) GetOneTransactionByUserId(request *common.OneRequest, userId int64) (*TransactionResponse, error) {
+func (s *transactionService) GetOneTransactionByUserId(request *common.OneRequest, userId int64, name string) (*TransactionResponse, error) {
 	res, err := s.repo.GetOneTransactionByUserId(request.Id, userId)
 	if err != nil {
 		return nil, err
@@ -329,6 +369,8 @@ func (s *transactionService) GetOneTransactionByUserId(request *common.OneReques
 			res.TableName = dataMenusAndTable.Tables[0].Name
 		}
 	}
+
+	res.OrderBy = name
 
 	return res, nil
 }
@@ -484,6 +526,34 @@ func getDataMenuByIdsAndTable(ids string, tableIds string) (GetMenusAndTableResp
 	if err != nil {
 		log.Error("Failed to unmarshal response body:", err)
 		return GetMenusAndTableResponse{}, response.InternalServerError("Internal Server Error", nil)
+	}
+
+	return data.Data, nil
+}
+
+func getUsersNameByIds(ids string) ([]UserResponse, error) {
+	urlAccount := fmt.Sprintf("%s/api/internal/name-users?ids=%s", config.Config.ServiceAccountUrl, ids)
+	params := url.Values{}
+	params.Add("ids", ids)
+
+	timestamp := time.Now().UTC().Format(time.RFC3339)
+
+	signature, err := createSignature(params.Encode(), "", timestamp)
+
+	if err != nil {
+		return nil, err
+	}
+
+	body, err := utils.InternalRequest(signature, timestamp, urlAccount, "GET", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var data InternalGetUserResponse
+	err = json.Unmarshal(body, &data)
+	if err != nil {
+		log.Error("Failed to unmarshal response body:", err)
+		return nil, response.InternalServerError("Internal Server Error", nil)
 	}
 
 	return data.Data, nil
