@@ -28,6 +28,7 @@ type appConfig struct {
 	ServiceWalletUrl     string
 	AllowedOrigins       string
 	RabbitmqUrl          string
+	ServiceAccountUrl    string
 }
 
 var Config appConfig
@@ -63,5 +64,6 @@ func init() {
 		ServiceWalletUrl:     viper.GetString("SERVICE_WALLET_URL"),
 		AllowedOrigins:       viper.GetString("ALLOWED_ORIGINS"),
 		RabbitmqUrl:          viper.GetString("RABBITMQ_URL"),
+		ServiceAccountUrl:    viper.GetString("SERVICE_ACCOUNT_URL"),
 	}
 }
