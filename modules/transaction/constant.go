@@ -14,7 +14,7 @@ SELECT
             'menuId', td.menu_id,
             'qty', td.qty,
             'price', td.price,
-            'id': td.id,
+            'id', td.id,
             'notes', td.notes,
             'totalPrice', td.total_price,
             'rating', td.rating                    
