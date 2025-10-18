@@ -86,6 +86,7 @@ type TransactionDetail struct {
 	MenuId      int     `json:"menuId" db:"menuId"`
 	Qty         int     `json:"qty" db:"qty"`
 	Price       float64 `json:"price" db:"price"`
+	Id          int     `json:"id" db:"id"`
 	Notes       string  `json:"notes" db:"notes"`
 	TotalPrice  float64 `json:"totalPrice" db:"totalPrice"`
 	Rating      *int8   `json:"rating" db:"rating"`
