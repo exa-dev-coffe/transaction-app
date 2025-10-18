@@ -48,7 +48,7 @@ func initiator() {
 	fiberApp.Use(cors.New(cors.Config{
 		AllowOrigins: config.Config.AllowedOrigins,
 		AllowHeaders: "Origin, Content-Type, Accept, Authorization, X-Timestamp, X-Signature",
-		AllowMethods: "GET, POST, PUT, DELETE, OPTIONS",
+		AllowMethods: "GET, POST, PUT, DELETE, OPTIONS, PATCH",
 	}))
 
 	// Initialize routes
