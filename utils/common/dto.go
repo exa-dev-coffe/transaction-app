@@ -1,6 +1,8 @@
 package common
 
-import "github.com/golang-jwt/jwt/v5"
+import (
+	"github.com/golang-jwt/jwt/v5"
+)
 
 type ParamsListRequest struct {
 	Search     Search // field, value
@@ -43,4 +45,9 @@ type Claims struct {
 	Type     string `json:"Type"`
 	Role     string `json:"Role"`
 	jwt.RegisteredClaims
+}
+
+type DateOrder struct {
+	StartDate string `json:"startDate" validate:"required" `
+	EndDate   string `json:"endDate" validate:"required" `
 }

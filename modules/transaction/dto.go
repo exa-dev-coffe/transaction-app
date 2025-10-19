@@ -3,6 +3,8 @@ package transaction
 import (
 	"encoding/json"
 	"fmt"
+
+	"eka-dev.cloud/transaction-service/utils/common"
 )
 
 // TODO: define DTOs here
@@ -114,4 +116,16 @@ type SetRatingMenuRequest struct {
 	Id        int   `json:"id" validate:"required"`
 	Rating    int   `json:"rating" validate:"required,min=1,max=5"`
 	UpdatedBy int64 `json:"updatedBy"`
+}
+
+type GetListTransactionsRequest struct {
+	StartDate string `json:"startDate"`
+	EndDate   string `json:"endDate"`
+	common.ParamsListRequest
+}
+
+type SummaryReport struct {
+	Total      float64 `json:"total" db:"total"`
+	TotalOrder int64   `json:"totalOrder" db:"total_order"`
+	CreatedAt  string  `json:"createdAt" db:"created_at"`
 }
