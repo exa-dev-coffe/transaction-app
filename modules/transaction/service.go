@@ -21,13 +21,14 @@ import (
 type Service interface {
 	// TODO: define service methods
 	CreateTransaction(tx *sqlx.Tx, request CreateTransactionRequest) error
-	GetListTransactionsPagination(request common.ParamsListRequest) (*response.Pagination[[]TransactionResponse], error)
-	GetListTransactionsNoPagination(request common.ParamsListRequest) ([]TransactionResponse, error)
+	GetListTransactionsPagination(request GetListTransactionsRequest) (*response.Pagination[[]TransactionResponse], error)
+	GetListTransactionsNoPagination(request GetListTransactionsRequest) ([]TransactionResponse, error)
 	GetOneTransaction(request *common.OneRequest) (*TransactionResponse, error)
 	GetListTransactionsByUserId(request common.ParamsListRequest, userId int64, name string) (*response.Pagination[[]TransactionResponse], error)
 	GetOneTransactionByUserId(request *common.OneRequest, userId int64, name string) (*TransactionResponse, error)
 	UpdateOrderStatus(tx *sqlx.Tx, request UpdateOrderStatusRequest) error
 	SetRatingMenu(tx *sqlx.Tx, request SetRatingMenuRequest) error
+	SummaryReportTransactions(startDate string, endDate string) ([]SummaryReport, error)
 }
 
 type transactionService struct {
@@ -79,8 +80,8 @@ func (s *transactionService) CreateTransaction(tx *sqlx.Tx, request CreateTransa
 	return nil
 }
 
-func (s *transactionService) GetListTransactionsPagination(request common.ParamsListRequest) (*response.Pagination[[]TransactionResponse], error) {
-	res, err := s.repo.GetListTransactionsPagination(request)
+func (s *transactionService) GetListTransactionsPagination(request GetListTransactionsRequest) (*response.Pagination[[]TransactionResponse], error) {
+	res, err := s.repo.GetListTransactionsPagination(request.ParamsListRequest, request.StartDate, request.EndDate)
 	if err != nil {
 		return nil, err
 	}
@@ -152,8 +153,8 @@ func (s *transactionService) GetListTransactionsPagination(request common.Params
 	return res, nil
 }
 
-func (s *transactionService) GetListTransactionsNoPagination(request common.ParamsListRequest) ([]TransactionResponse, error) {
-	res, err := s.repo.GetListTransactionsNoPagination(request)
+func (s *transactionService) GetListTransactionsNoPagination(request GetListTransactionsRequest) ([]TransactionResponse, error) {
+	res, err := s.repo.GetListTransactionsNoPagination(request.ParamsListRequest, request.StartDate, request.EndDate)
 	if err != nil {
 		return nil, err
 	}
@@ -405,6 +406,10 @@ func (s *transactionService) SetRatingMenu(tx *sqlx.Tx, request SetRatingMenuReq
 	}
 
 	return nil
+}
+
+func (s *transactionService) SummaryReportTransactions(startDate string, endDate string) ([]SummaryReport, error) {
+	return s.repo.SummaryReportTransactions(startDate, endDate)
 }
 
 func calculateTotalPriceMenu(menus []MenuResponse, request *CreateTransactionRequest) float64 {

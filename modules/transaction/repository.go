@@ -14,13 +14,14 @@ type Repository interface {
 	// TODO: define repository methods
 	InsertThTransaction(tx *sqlx.Tx, transaction CreateTransactionRequest) (int, error)
 	InsertTdTransaction(tx *sqlx.Tx, transactionId int, createdBy int64, data Data) error
-	GetListTransactionsPagination(params common.ParamsListRequest) (*response.Pagination[[]TransactionResponse], error)
-	GetListTransactionsNoPagination(request common.ParamsListRequest) ([]TransactionResponse, error)
+	GetListTransactionsPagination(params common.ParamsListRequest, startDate string, endDate string) (*response.Pagination[[]TransactionResponse], error)
+	GetListTransactionsNoPagination(request common.ParamsListRequest, startDate string, endDate string) ([]TransactionResponse, error)
 	GetOneTransaction(id int) (*TransactionResponse, error)
 	GetListTransactionsByUserId(params common.ParamsListRequest, userId int64) (*response.Pagination[[]TransactionResponse], error)
 	GetOneTransactionByUserId(id int, userId int64) (*TransactionResponse, error)
 	UpdateOrderStatus(tx *sqlx.Tx, id int, updatedBy int64) error
 	SetRatingMenu(tx *sqlx.Tx, id int, rating int, updatedBy int64) (int, error)
+	SummaryReportTransactions(startDate string, endDate string) ([]SummaryReport, error)
 }
 
 type transactionRepository struct {
@@ -54,12 +55,20 @@ func (r *transactionRepository) InsertTdTransaction(tx *sqlx.Tx, transactionId i
 	return nil
 }
 
-func (r *transactionRepository) GetListTransactionsPagination(params common.ParamsListRequest) (*response.Pagination[[]TransactionResponse], error) {
+func (r *transactionRepository) GetListTransactionsPagination(params common.ParamsListRequest, startDate string, endDate string) (*response.Pagination[[]TransactionResponse], error) {
 	var record = make([]TransactionResponse, 0)
 
 	common.BuildMappingField(params, &mappingFieds)
 
-	finalQuery, args := common.BuildFilterQuery(baseQuery, params, &mappingFiedType, " GROUP BY t.id ")
+	query := baseQuery
+	if startDate != "" && endDate != "" {
+		query += " WHERE CAST(t.created_at AS DATE) BETWEEN :start_date AND :end_date "
+	}
+
+	finalQuery, args := common.BuildFilterQuery(query, params, &mappingFiedType, " GROUP BY t.id ")
+
+	args["start_date"] = startDate
+	args["end_date"] = endDate
 
 	rows, err := r.db.NamedQuery(finalQuery, args)
 
@@ -85,7 +94,18 @@ func (r *transactionRepository) GetListTransactionsPagination(params common.Para
 	}
 
 	var totalData int
-	countFinalQuery, countArgs := common.BuildCountQuery("SELECT COUNT(id) FROM th_user_checkouts ", params, &mappingFiedType)
+
+	queryCount := "SELECT COUNT(id) FROM th_user_checkouts "
+
+	if startDate != "" && endDate != "" {
+		queryCount += " WHERE created_at BETWEEN :start_date AND :end_date "
+	}
+
+	countFinalQuery, countArgs := common.BuildCountQuery(queryCount, params, &mappingFiedType)
+
+	countArgs["start_date"] = startDate
+	countArgs["end_date"] = endDate
+
 	countStmt, err := r.db.PrepareNamed(countFinalQuery)
 
 	if err != nil {
@@ -118,12 +138,21 @@ func (r *transactionRepository) GetListTransactionsPagination(params common.Para
 	return &pagination, nil
 }
 
-func (r *transactionRepository) GetListTransactionsNoPagination(request common.ParamsListRequest) ([]TransactionResponse, error) {
+func (r *transactionRepository) GetListTransactionsNoPagination(request common.ParamsListRequest, startDate string, endDate string) ([]TransactionResponse, error) {
 	var record = make([]TransactionResponse, 0)
 
 	common.BuildMappingField(request, &mappingFieds)
 
-	finalQuery, args := common.BuildFilterQuery(baseQuery, request, &mappingFiedType, " GROUP BY t.id ")
+	query := baseQuery
+
+	if startDate != "" && endDate != "" {
+		query += " WHERE CAST(t.created_at AS DATE) BETWEEN :start_date AND :end_date "
+	}
+
+	finalQuery, args := common.BuildFilterQuery(query, request, &mappingFiedType, " GROUP BY t.id ")
+
+	args["start_date"] = startDate
+	args["end_date"] = endDate
 
 	rows, err := r.db.NamedQuery(finalQuery, args)
 	if err != nil {
@@ -287,6 +316,38 @@ func (r *transactionRepository) SetRatingMenu(tx *sqlx.Tx, id int, rating int, u
 	}
 
 	return menuId, nil
+}
+
+func (r *transactionRepository) SummaryReportTransactions(startDate string, endDate string) ([]SummaryReport, error) {
+	var summary = make([]SummaryReport, 0)
+	query := `SELECT
+		SUM(t.total_price) AS total, t.created_at, COUNT(t.id) AS total_order				
+		FROM th_user_checkouts t
+		WHERE CAST(t.created_at AS DATE) BETWEEN $1 AND $2 group by t.created_at`
+
+	rows, err := r.db.Queryx(query, startDate, endDate)
+	if err != nil {
+		log.Error("Failed to get summary report:", err)
+		return nil, response.InternalServerError("Failed to get summary report", nil)
+	}
+	defer func(rows *sqlx.Rows) {
+		err := rows.Close()
+		if err != nil {
+			log.Error("failed to close rows:", err)
+			return
+		}
+	}(rows)
+
+	for rows.Next() {
+		var report SummaryReport
+		if err := rows.StructScan(&report); err != nil {
+			log.Error("Failed to scan summary report:", err)
+			return nil, response.InternalServerError("Failed to scan summary report", nil)
+		}
+		summary = append(summary, report)
+	}
+
+	return summary, nil
 }
 
 func validateAffectedRows(info sql.Result, message string) error {

@@ -17,6 +17,9 @@ type Handler interface {
 	GetOneTransaction(c *fiber.Ctx) error
 	GetListTransactionsByUserId(c *fiber.Ctx) error
 	GetOneTransactionByUserId(c *fiber.Ctx) error
+	UpdateOrderStatus(c *fiber.Ctx) error
+	SetRatingMenu(c *fiber.Ctx) error
+	SummaryReportTransactions(c *fiber.Ctx) error
 }
 
 type handler struct {
@@ -37,6 +40,7 @@ func NewHandler(app *fiber.App, db *sqlx.DB) Handler {
 	routes.Get("/history-checkouts/detail", middleware.RequireAuth, h.GetOneTransactionByUserId)
 	routes.Patch("/transactions/update-order-status", middleware.RequireRole("admin", "barista"), h.UpdateOrderStatus)
 	routes.Patch("/history-checkouts/set-rating-menu", middleware.RequireAuth, h.SetRatingMenu)
+	routes.Get("/transactions/summary-report", middleware.RequireRole("admin", "barista"), h.SummaryReportTransactions)
 
 	// routes.Get("", h.GetSomething)
 
@@ -80,16 +84,39 @@ func (h *handler) GetListTransactions(c *fiber.Ctx) error {
 		return err
 	}
 
-	err := lib.ValidateRequest(paramsListRequest)
+	startDate := queryParams["startDate"]
+	endDate := queryParams["endDate"]
+
+	if startDate != "" && endDate != "" {
+		dateRequest := common.DateOrder{}
+		err := c.QueryParser(&dateRequest)
+		if err != nil {
+			log.Error("Failed to parse request query:", err)
+			return response.BadRequest("Invalid request query", nil)
+		}
+
+		err = lib.ValidateRequest(dateRequest)
+		if err != nil {
+			return err
+		}
+	}
+
+	var request = GetListTransactionsRequest{
+		ParamsListRequest: paramsListRequest,
+		StartDate:         startDate,
+		EndDate:           endDate,
+	}
+
+	err := lib.ValidateRequest(request)
 	if err != nil {
 		return err
 	}
 
 	var records interface{}
 	if paramsListRequest.NoPaginate {
-		records, err = h.service.GetListTransactionsNoPagination(paramsListRequest)
+		records, err = h.service.GetListTransactionsNoPagination(request)
 	} else {
-		records, err = h.service.GetListTransactionsPagination(paramsListRequest)
+		records, err = h.service.GetListTransactionsPagination(request)
 	}
 	if err != nil {
 		return err
@@ -215,4 +242,28 @@ func (h *handler) SetRatingMenu(c *fiber.Ctx) error {
 	}
 
 	return c.Status(fiber.StatusOK).JSON(response.Success("Set rating menu successfully", nil))
+}
+
+func (h *handler) SummaryReportTransactions(c *fiber.Ctx) error {
+	// Parse query parameters
+
+	var request common.DateOrder
+
+	err := c.QueryParser(&request)
+	if err != nil {
+		log.Error("Failed to parse request query:", err)
+		return response.BadRequest("Invalid request query", nil)
+	}
+
+	err = lib.ValidateRequest(request)
+	if err != nil {
+		return err
+	}
+
+	record, err := h.service.SummaryReportTransactions(request.StartDate, request.EndDate)
+	if err != nil {
+		return err
+	}
+
+	return c.Status(fiber.StatusOK).JSON(response.Success("Success", record))
 }

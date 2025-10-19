@@ -6,7 +6,6 @@ import (
 	"strconv"
 	"strings"
 
-	"eka-dev.cloud/transaction-service/lib"
 	"eka-dev.cloud/transaction-service/utils/response"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/log"
@@ -242,12 +241,6 @@ func GetOneDataRequest(c *fiber.Ctx) (*OneRequest, error) {
 	}
 	if request.Id <= 0 {
 		return nil, response.BadRequest("Invalid id parameter", nil)
-	}
-
-	err = lib.ValidateRequest(request)
-
-	if err != nil {
-		return nil, err
 	}
 
 	return &request, nil

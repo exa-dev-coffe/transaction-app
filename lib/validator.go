@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"mime/multipart"
 	"regexp"
+	"time"
 
+	"eka-dev.cloud/transaction-service/utils/common"
 	"eka-dev.cloud/transaction-service/utils/response"
 	"github.com/go-playground/validator/v10"
 	"github.com/gofiber/fiber/v2/log"
@@ -19,8 +21,37 @@ func init() {
 		matched, _ := regexp.MatchString(`^[0-9]{6}$`, fl.Field().String())
 		return matched
 	})
+	Validate.RegisterStructValidation(ValidateDateOrder, common.DateOrder{})
 	if err != nil {
 		log.Fatal("Error registering numeric validation:", err)
+	}
+}
+
+func ValidateDateOrder(sl validator.StructLevel) {
+	req := sl.Current().Interface().(common.DateOrder)
+
+	if req.StartDate == "" || req.EndDate == "" {
+		return // biarkan validator `required` yang handle
+	}
+
+	layout := "2006-01-02"
+
+	startDate, err1 := time.Parse(layout, req.StartDate)
+	endDate, err2 := time.Parse(layout, req.EndDate)
+
+	// Jika format salah
+	if err1 != nil {
+		sl.ReportError(req.StartDate, "StartDate", "start_date", "invalid_date_format", "format harus YYYY-MM-DD")
+		return
+	}
+	if err2 != nil {
+		sl.ReportError(req.EndDate, "EndDate", "end_date", "invalid_date_format", "format harus YYYY-MM-DD")
+		return
+	}
+
+	// Jika endDate sebelum startDate
+	if endDate.Before(startDate) {
+		sl.ReportError(req.EndDate, "EndDate", "end_date", "dateorder", "EndDate tidak boleh sebelum StartDate")
 	}
 }
 
@@ -60,6 +91,12 @@ func validationMessage(e validator.FieldError) string {
 		return fmt.Sprintf("%s must be less than or equal to %s", e.Field(), e.Param())
 	case "oneof":
 		return fmt.Sprintf("%s must be one of [%s]", e.Field(), e.Param())
+	case "numeric":
+		return fmt.Sprintf("%s must be a 6-digit numeric code", e.Field())
+	case "invalid_date_format":
+		return fmt.Sprintf("%s must be in YYYY-MM-DD format", e.Field())
+	case "dateorder":
+		return fmt.Sprintf("%s must be after StartDate", e.Field())
 	default:
 		return fmt.Sprintf("%s is not valid", e.Field())
 	}
