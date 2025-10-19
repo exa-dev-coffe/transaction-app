@@ -321,9 +321,9 @@ func (r *transactionRepository) SetRatingMenu(tx *sqlx.Tx, id int, rating int, u
 func (r *transactionRepository) SummaryReportTransactions(startDate string, endDate string) ([]SummaryReport, error) {
 	var summary = make([]SummaryReport, 0)
 	query := `SELECT
-		SUM(t.total_price) AS total, t.created_at, COUNT(t.id) AS total_order				
+		SUM(t.total_price) AS total,  CAST(t.created_at AS DATE), COUNT(t.id) AS total_order				
 		FROM th_user_checkouts t
-		WHERE CAST(t.created_at AS DATE) BETWEEN $1 AND $2 group by t.created_at`
+		WHERE CAST(t.created_at AS DATE) BETWEEN $1 AND $2 group by CAST(t.created_at AS DATE)`
 
 	rows, err := r.db.Queryx(query, startDate, endDate)
 	if err != nil {
