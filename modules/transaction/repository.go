@@ -98,7 +98,7 @@ func (r *transactionRepository) GetListTransactionsPagination(params common.Para
 	queryCount := "SELECT COUNT(id) FROM th_user_checkouts "
 
 	if startDate != "" && endDate != "" {
-		queryCount += " WHERE created_at BETWEEN :start_date AND :end_date "
+		queryCount += " WHERE CAST(created_at AS DATE) BETWEEN :start_date AND :end_date "
 	}
 
 	countFinalQuery, countArgs := common.BuildCountQuery(queryCount, params, &mappingFiedType)
