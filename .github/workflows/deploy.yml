@@ -27,12 +27,13 @@ jobs:
           mkdir -p ~/.ssh
           echo "${{ secrets.SSH_KEY }}" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
-          ssh-keyscan -p 31086 -H ${{ secrets.VPS_HOST }} >> ~/.ssh/known_hosts
+          ssh-keyscan -p 31080 -H ${{ secrets.VPS_HOST }} >> ~/.ssh/known_hosts
           
-          ssh -p 31086 -i ~/.ssh/id_ed25519 deploy@${{ secrets.VPS_HOST }} << 'EOF'
+          ssh -p 31080 -i ~/.ssh/id_ed25519 deploy@${{ secrets.VPS_HOST }} << 'EOF'
             docker login ghcr.io -u ${{ github.repository_owner }} -p '${{ secrets.GHCR_TOKEN }}'
             docker pull ghcr.io/${{ github.repository_owner }}/transaction-service-coffe:latest
-            docker stop transaction-service-coffe || true && docker rm transaction-service-coffe || true 
-          
+            docker stop transaction-service-coffe || true && docker rm transaction-service-coffe || true           
             docker run --env-file /home/deploy/env_project/coffe/transaction_service/.env -d --name transaction-service-coffe --network coffe-net -p 8006:8006 --memory="512m" --cpus="1.0" --restart=on-failure:5 ghcr.io/${{ github.repository_owner }}/transaction-service-coffe:latest
+            cd kube_config/coffe
+            kubectl apply -f transaction-service.yaml
           EOF

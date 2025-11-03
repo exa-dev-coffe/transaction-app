@@ -6,6 +6,7 @@ import (
 	"eka-dev.cloud/transaction-service/config"
 	"eka-dev.cloud/transaction-service/db"
 	_ "eka-dev.cloud/transaction-service/db"
+	"eka-dev.cloud/transaction-service/lib"
 	_ "eka-dev.cloud/transaction-service/lib"
 	"eka-dev.cloud/transaction-service/middleware"
 	"eka-dev.cloud/transaction-service/modules/transaction"
@@ -42,7 +43,17 @@ func initiator() {
 	}))
 
 	fiberApp.Get("/health", func(c *fiber.Ctx) error {
-		return c.SendString("OK")
+		err := db.DB.Ping()
+		if err != nil {
+			log.Println("Database ping failed:", err)
+			return c.Status(fiber.StatusInternalServerError).JSON(response.InternalServerError("Database connection error", nil))
+		}
+		_, err = lib.GetChannel()
+		if err != nil {
+			log.Println("RabbitMQ connection failed:", err)
+			return c.Status(fiber.StatusInternalServerError).JSON(response.InternalServerError("RabbitMQ connection error", nil))
+		}
+		return c.Status(fiber.StatusOK).JSON(response.Success("OK", nil))
 	})
 
 	fiberApp.Use(cors.New(cors.Config{
