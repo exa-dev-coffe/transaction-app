@@ -38,7 +38,7 @@ jobs:
             export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 
             # Patch the deployment to use the new SHA tag
-            kubectl set image deployment/transaction-service-coffe \
+            kubectl set image deployment/transaction-service-coffe -n dev-coffe \
               transaction-service-coffe=ghcr.io/${{ github.repository_owner }}/transaction-service-coffe:${{ steps.vars.outputs.sha }}
 
             # Optional: show rollout
