@@ -242,3 +242,11 @@ func ListenQueue(
 
 	return nil
 }
+
+func HealthCheck() error {
+	c := GetConnection()
+	if c.IsClosed() {
+		return amqp.ErrClosed
+	}
+	return nil
+}

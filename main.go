@@ -48,7 +48,7 @@ func initiator() {
 			log.Println("Database ping failed:", err)
 			return c.Status(fiber.StatusInternalServerError).JSON(response.InternalServerError("Database connection error", nil))
 		}
-		_, err = lib.GetChannel()
+		err = lib.HealthCheck()
 		if err != nil {
 			log.Println("RabbitMQ connection failed:", err)
 			return c.Status(fiber.StatusInternalServerError).JSON(response.InternalServerError("RabbitMQ connection error", nil))
