@@ -28,8 +28,10 @@ JOIN td_user_checkouts td ON t.id = td.ref_id
 var mappingFieds = map[string]string{
 	"id":          "t.id",
 	"orderStatus": "t.order_status",
+	"orderFor":    "t.order_for",
 }
 var mappingFiedType = map[string]string{
 	"t.id":           "int",
 	"t.order_status": "int",
+	"t.order_for":    "string",
 }
