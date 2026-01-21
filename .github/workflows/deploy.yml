@@ -8,9 +8,81 @@ jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
 
+    # Biar bisa push commit
+    permissions:
+      contents: write
+      pull-requests: read
+    
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
+
+      - name: Setup git identity
+        run: |
+          git config user.email "ci@github.com"
+          git config user.name "GitHub Actions"
+
+      - name: Bump version
+        id: versioning
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+
+          CURRENT=$(cat VERSION)
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
+
+          BUMP="patch"
+
+          # Ambil PR number dari merge commit
+          PR_NUMBER=$(git log -1 --pretty=%B | grep -oE '#([0-9]+)' | tr -d '#' || true)
+
+          if [ -n "$PR_NUMBER" ]; then
+            echo "🔍 Checking PR #$PR_NUMBER comments..."
+
+            COMMENTS=$(curl -s \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/$PR_NUMBER/comments")
+
+            if echo "$COMMENTS" | grep -qi "/version major"; then
+              BUMP="major"
+            elif echo "$COMMENTS" | grep -qi "/version minor"; then
+              BUMP="minor"
+            elif echo "$COMMENTS" | grep -qi "/version patch"; then
+              BUMP="patch"
+            fi
+          else
+            echo "ℹ️ No PR detected, default patch"
+          fi
+
+          case "$BUMP" in
+            major)
+              MAJOR=$((MAJOR+1)); MINOR=0; PATCH=0 ;;
+            minor)
+              MINOR=$((MINOR+1)); PATCH=0 ;;
+            patch)
+              PATCH=$((PATCH+1)) ;;
+          esac
+
+          NEXT="$MAJOR.$MINOR.$PATCH"
+
+          echo "🔖 Version bump ($BUMP): v$CURRENT → v$NEXT"
+
+          echo "$NEXT" > VERSION
+          echo "VERSION=$NEXT" > version.env
+
+          git add VERSION
+          git commit -m "chore(version): bump to v$NEXT"
+          git push origin main
+
+          cat version.env
+
+      - name: Upload version artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: version
+          path: version.env
 
       - name: Get Commit SHA (short)
         id: vars
