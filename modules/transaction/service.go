@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"strings"
 	"time"
@@ -430,9 +431,16 @@ func calculateTotalPriceMenu(menus []MenuResponse, request *CreateTransactionReq
 func createSignature(params string, body string, timestamp string) (string, error) {
 
 	message := params + timestamp + body
+	
+	slog.Info("Generating HMAC Signature", 
+		slog.String("payload", message),
+		slog.String("params", params),
+		slog.String("body", body),
+	)
+
 	signature, err := utils.GenerateHMAC(message)
 	if err != nil {
-		log.Error("Failed to generate HMAC:", err)
+		slog.Error("Failed to generate HMAC", slog.String("error", err.Error()))
 		return "", response.InternalServerError("Internal Server Error", nil)
 	}
 
