@@ -477,15 +477,16 @@ func paymentUseWallet(userId int64, total float64, pin string) error {
 }
 
 func getAvailableMenuByIdsAndTableById(ids string, tableId int64) ([]MenuResponse, error) {
-	urlMasterData := fmt.Sprintf("%s/api/internal/available-menus-table?ids=%s&tableId=%d", config.Config.ServiceMasterDataUrl, ids, tableId)
-
 	params := url.Values{}
 	params.Add("ids", ids)
 	params.Add("tableId", fmt.Sprintf("%d", tableId))
+	
+	queryString := params.Encode()
+	urlMasterData := fmt.Sprintf("%s/api/internal/available-menus-table?%s", config.Config.ServiceMasterDataUrl, queryString)
 
 	timestamp := time.Now().UTC().Format(time.RFC3339)
 
-	signature, err := createSignature(params.Encode(), "", timestamp)
+	signature, err := createSignature(queryString, "", timestamp)
 
 	if err != nil {
 		return nil, err
@@ -507,15 +508,16 @@ func getAvailableMenuByIdsAndTableById(ids string, tableId int64) ([]MenuRespons
 }
 
 func getDataMenuByIdsAndTable(ids string, tableIds string) (GetMenusAndTableResponse, error) {
-	urlMasterData := fmt.Sprintf("%s/api/internal/data-menus-table?ids=%s&tableIds=%s", config.Config.ServiceMasterDataUrl, ids, tableIds)
-
 	params := url.Values{}
 	params.Add("ids", ids)
 	params.Add("tableIds", tableIds)
 
+	queryString := params.Encode()
+	urlMasterData := fmt.Sprintf("%s/api/internal/data-menus-table?%s", config.Config.ServiceMasterDataUrl, queryString)
+
 	timestamp := time.Now().UTC().Format(time.RFC3339)
 
-	signature, err := createSignature(params.Encode(), "", timestamp)
+	signature, err := createSignature(queryString, "", timestamp)
 
 	if err != nil {
 		return GetMenusAndTableResponse{}, err
@@ -537,13 +539,15 @@ func getDataMenuByIdsAndTable(ids string, tableIds string) (GetMenusAndTableResp
 }
 
 func getUsersNameByIds(ids string) ([]UserResponse, error) {
-	urlAccount := fmt.Sprintf("%s/api/internal/name-users?ids=%s", config.Config.ServiceAccountUrl, ids)
 	params := url.Values{}
 	params.Add("ids", ids)
+	
+	queryString := params.Encode()
+	urlAccount := fmt.Sprintf("%s/api/internal/name-users?%s", config.Config.ServiceAccountUrl, queryString)
 
 	timestamp := time.Now().UTC().Format(time.RFC3339)
 
-	signature, err := createSignature(params.Encode(), "", timestamp)
+	signature, err := createSignature(queryString, "", timestamp)
 
 	if err != nil {
 		return nil, err
