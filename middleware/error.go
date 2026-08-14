@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"errors"
+	"log/slog"
 	"time"
 
 	"eka-dev.cloud/transaction-service/utils/response"
@@ -10,6 +11,18 @@ import (
 
 // Middleware global error handler
 func ErrorHandler(c *fiber.Ctx, err error) error {
+	reqId := c.Locals("requestid")
+	var reqIdStr string
+	if reqId != nil {
+		reqIdStr = reqId.(string)
+	}
+
+	slog.Error("Unhandled error occurred",
+		slog.String("request_id", reqIdStr),
+		slog.String("error", err.Error()),
+		slog.String("path", c.Path()),
+	)
+
 	// Kalau error sudah tipe *AppError, balikin langsung
 	var appErr *response.AppError
 	if errors.As(err, &appErr) {
