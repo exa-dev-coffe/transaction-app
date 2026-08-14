@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"fmt"
+	"log/slog"
 	"time"
 
 	"eka-dev.cloud/transaction-service/utils"
@@ -33,6 +34,11 @@ func ValidateSignature(c *fiber.Ctx) error {
 
 	// Buat message string-nya
 	message := fmt.Sprintf("%s%s%s", query, timestamp, body)
+
+	slog.Info("HMAC Validation Data",
+		slog.String("payload", message),
+		slog.String("body", body),
+	)
 
 	// Buat HMAC-nya
 	err = utils.VerifySignature(message, signature)
