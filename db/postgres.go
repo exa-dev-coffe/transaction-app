@@ -8,6 +8,7 @@ import (
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database/postgres"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
+	"github.com/XSAM/otelsql"
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
 )
@@ -21,8 +22,12 @@ func init() {
 		log.Fatalln("Database DSN is not set")
 	}
 
-	var err error
-	DB, err = sqlx.Open(constant.DialectPostgres, dsn)
+	driverName, err := otelsql.Register(constant.DialectPostgres)
+	if err != nil {
+		driverName = constant.DialectPostgres
+	}
+
+	DB, err = sqlx.Open(driverName, dsn)
 	if err != nil {
 		log.Fatalln("Failed to connect to database:", err)
 	}

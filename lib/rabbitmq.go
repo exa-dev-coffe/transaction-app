@@ -1,6 +1,8 @@
 package lib
 
 import (
+	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -8,7 +10,35 @@ import (
 	"eka-dev.cloud/transaction-service/utils/response"
 	"github.com/gofiber/fiber/v2/log"
 	amqp "github.com/rabbitmq/amqp091-go"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
+
+// AmqpHeaderCarrier adapts amqp.Table to OpenTelemetry TextMapCarrier
+type AmqpHeaderCarrier amqp.Table
+
+func (c AmqpHeaderCarrier) Get(key string) string {
+	if val, ok := c[key]; ok {
+		if str, ok := val.(string); ok {
+			return str
+		}
+	}
+	return ""
+}
+
+func (c AmqpHeaderCarrier) Set(key string, value string) {
+	c[key] = value
+}
+
+func (c AmqpHeaderCarrier) Keys() []string {
+	keys := make([]string, 0, len(c))
+	for k := range c {
+		keys = append(keys, k)
+	}
+	return keys
+}
 
 var (
 	conn     *amqp.Connection
@@ -128,6 +158,21 @@ func SendMessage(
 			}
 		}
 
+		if props.Headers == nil {
+			props.Headers = make(amqp.Table)
+		}
+		tracer := otel.GetTracerProvider().Tracer("rabbitmq-client")
+		ctx, span := tracer.Start(context.Background(), fmt.Sprintf("rabbitmq.publish %s", queueName),
+			trace.WithSpanKind(trace.SpanKindProducer),
+			trace.WithAttributes(
+				attribute.String("messaging.system", "rabbitmq"),
+				attribute.String("messaging.destination", exchange),
+				attribute.String("messaging.rabbitmq.routing_key", routingKey),
+			),
+		)
+		defer span.End()
+		otel.GetTextMapPropagator().Inject(ctx, AmqpHeaderCarrier(props.Headers))
+
 		// Publish message
 		if err := ch.Publish(
 			exchange,
@@ -136,9 +181,12 @@ func SendMessage(
 			false,
 			props,
 		); err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
 			log.Error("Failed to publish message:", err)
 			return response.InternalServerError("Failed to publish message", nil)
 		}
+		span.SetStatus(codes.Ok, "")
 
 	default:
 		log.Errorf("[!] Unsupported exchange type: %v\n", exchangeType)
@@ -228,15 +276,41 @@ func ListenQueue(
 		q.Name, exchange, routingKey, consumerName)
 
 	go func() {
+		tracer := otel.GetTracerProvider().Tracer("rabbitmq-client")
+		propagator := otel.GetTextMapPropagator()
+
 		for msg := range msgs {
+			var carrier AmqpHeaderCarrier
+			if msg.Headers != nil {
+				carrier = AmqpHeaderCarrier(msg.Headers)
+			} else {
+				carrier = make(AmqpHeaderCarrier)
+			}
+			ctx := propagator.Extract(context.Background(), carrier)
+
+			_, span := tracer.Start(ctx, fmt.Sprintf("rabbitmq.consume %s", queueName),
+				trace.WithSpanKind(trace.SpanKindConsumer),
+				trace.WithAttributes(
+					attribute.String("messaging.system", "rabbitmq"),
+					attribute.String("messaging.source", queueName),
+					attribute.String("messaging.operation", "receive"),
+				),
+			)
+
 			if err := handler(msg); err != nil {
+				span.RecordError(err)
+				span.SetStatus(codes.Error, err.Error())
 				log.Errorf("[!] Handler error: %v", err)
 				if !autoAck {
 					_ = msg.Nack(false, true)
 				}
-			} else if !autoAck {
-				_ = msg.Ack(false)
+			} else {
+				span.SetStatus(codes.Ok, "")
+				if !autoAck {
+					_ = msg.Ack(false)
+				}
 			}
+			span.End()
 		}
 	}()
 

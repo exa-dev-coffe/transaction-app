@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log"
 
 	"eka-dev.cloud/transaction-service/config"
@@ -20,6 +21,11 @@ import (
 func main() {
 	middleware.InitLogger("transaction-service")
 	
+	shutdown, err := lib.InitTracer("transaction-service")
+	if err == nil && shutdown != nil {
+		defer shutdown(context.Background())
+	}
+
 	// Load env
 	initiator()
 
@@ -39,6 +45,7 @@ func initiator() {
 	})
 
 	fiberApp.Use(requestid.New())
+	fiberApp.Use(middleware.TraceMiddleware())
 	fiberApp.Use(middleware.RequestLogger())
 
 	fiberApp.Get("/health", func(c *fiber.Ctx) error {

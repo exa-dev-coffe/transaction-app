@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // InitLogger initializes slog as default logger with JSONHandler
@@ -41,6 +42,14 @@ func RequestLogger() fiber.Handler {
 			slog.Int("status", status),
 			slog.String("latency", latency.String()),
 			slog.String("ip", c.IP()),
+		}
+
+		span := trace.SpanFromContext(c.UserContext())
+		if span.SpanContext().IsValid() {
+			attrs = append(attrs,
+				slog.String("trace_id", span.SpanContext().TraceID().String()),
+				slog.String("span_id", span.SpanContext().SpanID().String()),
+			)
 		}
 
 		if err != nil {

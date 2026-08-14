@@ -7,6 +7,7 @@ import (
 
 	"eka-dev.cloud/transaction-service/utils/response"
 	"github.com/gofiber/fiber/v2"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // Middleware global error handler
@@ -17,11 +18,21 @@ func ErrorHandler(c *fiber.Ctx, err error) error {
 		reqIdStr = reqId.(string)
 	}
 
-	slog.Error("Unhandled error occurred",
+	attrs := []any{
 		slog.String("request_id", reqIdStr),
 		slog.String("error", err.Error()),
 		slog.String("path", c.Path()),
-	)
+	}
+
+	span := trace.SpanFromContext(c.UserContext())
+	if span.SpanContext().IsValid() {
+		attrs = append(attrs,
+			slog.String("trace_id", span.SpanContext().TraceID().String()),
+			slog.String("span_id", span.SpanContext().SpanID().String()),
+		)
+	}
+
+	slog.Error("Unhandled error occurred", attrs...)
 
 	// Kalau error sudah tipe *AppError, balikin langsung
 	var appErr *response.AppError
