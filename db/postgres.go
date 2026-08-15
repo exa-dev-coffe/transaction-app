@@ -22,15 +22,14 @@ func init() {
 		log.Fatalln("Database DSN is not set")
 	}
 
-	driverName, err := otelsql.Register(constant.DialectPostgres)
+	// Register and open with otelsql
+	sqlDb, err := otelsql.Open(constant.DialectPostgres, dsn, otelsql.WithAttributes())
 	if err != nil {
-		driverName = constant.DialectPostgres
+		log.Fatalln("Failed to connect to database with otelsql:", err)
 	}
 
-	DB, err = sqlx.Open(driverName, dsn)
-	if err != nil {
-		log.Fatalln("Failed to connect to database:", err)
-	}
+	// Tell sqlx to treat this connection as standard 'postgres' for named query binding ($1, $2, etc.)
+	DB = sqlx.NewDb(sqlDb, "postgres")
 
 	// Db configuration
 	DB.SetMaxOpenConns(config.Config.DBMaxPoolSize)
