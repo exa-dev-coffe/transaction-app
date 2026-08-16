@@ -301,7 +301,12 @@ func (r *transactionRepository) UpdateOrderStatus(tx *sqlx.Tx, id int, updatedBy
 }
 
 func (r *transactionRepository) SetRatingMenu(tx *sqlx.Tx, id int, rating int, updatedBy int64) (int, error) {
-	query := `UPDATE td_user_checkouts SET rating = $1, updated_by = $2 WHERE id = $3 AND rating IS NULL RETURNING menu_id`
+	query := `UPDATE td_user_checkouts td
+		SET rating = $1, updated_by = $2
+		FROM th_user_checkouts th
+		WHERE td.id = $3 AND td.rating IS NULL
+		AND td.ref_id = th.id AND th.order_status = 2
+		RETURNING td.menu_id`
 
 	var menuId int
 
@@ -309,7 +314,7 @@ func (r *transactionRepository) SetRatingMenu(tx *sqlx.Tx, id int, rating int, u
 
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return 0, response.BadRequest("No rows were updated, possibly due to invalid ID or rating already set", nil)
+			return 0, response.BadRequest("No rows were updated, possibly due to invalid ID, rating already set, or order not completed", nil)
 		}
 		log.Error("Failed to set rating:", err)
 		return 0, response.InternalServerError("Failed to set rating", nil)
