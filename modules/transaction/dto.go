@@ -41,6 +41,7 @@ type InternalGetUserResponse struct {
 type UserResponse struct {
 	UserId   int64  `json:"userId" `
 	FullName string `json:"fullName"`
+	Email    string `json:"email"`
 }
 
 type Data struct {

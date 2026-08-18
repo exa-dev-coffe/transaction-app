@@ -78,6 +78,80 @@ func (s *transactionService) CreateTransaction(tx *sqlx.Tx, request CreateTransa
 		}
 	}
 
+	// Trigger notifications asynchronously after successful creation
+	go func() {
+		// Wait a small duration to ensure DB transaction is committed
+		time.Sleep(50 * time.Millisecond)
+
+		// Fetch full transaction details (including menu names, table name, user name)
+		orderDetail, err := s.GetOneTransaction(&common.OneRequest{Id: id})
+		if err != nil {
+			log.Error("Failed to fetch full order details for SSE new order:", err)
+			return
+		}
+
+		// 1. Get user details for email template
+		var userName, email string
+		users, err := getUsersNameByIds(fmt.Sprintf("%d", request.CreatedBy))
+		if err == nil && len(users) > 0 {
+			userName = users[0].FullName
+			email = users[0].Email
+		} else {
+			userName = orderDetail.OrderBy
+			email = ""
+		}
+
+		ch, err := lib.GetChannel()
+		if err != nil {
+			log.Error("Failed to get rabbitmq channel for transaction notifications:", err)
+			return
+		}
+		defer ch.Close()
+
+		// 2. Publish SSE event for Barista real-time updates (Fanout exchange "order.created")
+		type ssePayloadObj struct {
+			Event string               `json:"event"`
+			Data  *TransactionResponse `json:"data"`
+		}
+		payloadObj := ssePayloadObj{
+			Event: "new_order",
+			Data:  orderDetail,
+		}
+		ssePayload, err := json.Marshal(payloadObj)
+		if err != nil {
+			log.Error("Failed to marshal SSE payload:", err)
+		} else {
+			err = lib.SendMessage(ch, "", "", "order.created", lib.ExchangeFanout, amqp.Publishing{
+				ContentType: "application/json",
+				Body:        ssePayload,
+			}, string(ssePayload), false, false, true, amqp.Table{})
+			if err != nil {
+				log.Error("Failed to publish SSE new order message:", err)
+			}
+		}
+
+		// 3. Publish Email notification if user email exists (Direct exchange "email.queue")
+		if email != "" {
+			emailPayload := []byte(fmt.Sprintf(`{
+				"to": "%s",
+				"subject": "Order Confirmation - Diskusi Coffee",
+				"userName": "%s",
+				"orderId": %d,
+				"orderFor": "%s",
+				"amount": %f,
+				"date": "%s"
+			}`, email, userName, id, request.OrderFor, request.Total, time.Now().Format("2006-01-02 15:04:05")))
+
+			err = lib.SendMessage(ch, "Email Order Receipt", "emailQueue.orderReceipt", "email.queue", lib.ExchangeDirect, amqp.Publishing{
+				ContentType: "application/json",
+				Body:        emailPayload,
+			}, string(emailPayload), true, false, false, amqp.Table{})
+			if err != nil {
+				log.Error("Failed to publish Email order receipt message:", err)
+			}
+		}
+	}()
+
 	return nil
 }
 
@@ -382,6 +456,48 @@ func (s *transactionService) UpdateOrderStatus(tx *sqlx.Tx, request UpdateOrderS
 	if err != nil {
 		return err
 	}
+
+	// Trigger real-time status update notification asynchronously
+	go func() {
+		// Wait a small duration to ensure DB transaction is committed
+		time.Sleep(50 * time.Millisecond)
+
+		orderDetail, err := s.GetOneTransaction(&common.OneRequest{Id: request.Id})
+		if err != nil {
+			log.Error("Failed to fetch full order details for SSE update status:", err)
+			return
+		}
+
+		ch, err := lib.GetChannel()
+		if err != nil {
+			log.Error("Failed to get rabbitmq channel for status update SSE:", err)
+			return
+		}
+		defer ch.Close()
+
+		type ssePayloadObj struct {
+			Event string               `json:"event"`
+			Data  *TransactionResponse `json:"data"`
+		}
+		payloadObj := ssePayloadObj{
+			Event: "update_order_status",
+			Data:  orderDetail,
+		}
+		ssePayload, err := json.Marshal(payloadObj)
+		if err != nil {
+			log.Error("Failed to marshal SSE payload:", err)
+			return
+		}
+
+		// Publish to order.created fanout exchange
+		err = lib.SendMessage(ch, "", "", "order.created", lib.ExchangeFanout, amqp.Publishing{
+			ContentType: "application/json",
+			Body:        ssePayload,
+		}, string(ssePayload), false, false, true, amqp.Table{})
+		if err != nil {
+			log.Error("Failed to publish SSE status update message:", err)
+		}
+	}()
 
 	return nil
 }
