@@ -30,7 +30,7 @@ type Service interface {
 	GetOneTransactionByUserId(request *common.OneRequest, userId int64, name string) (*TransactionResponse, error)
 	UpdateOrderStatus(tx *sqlx.Tx, request UpdateOrderStatusRequest) error
 	SetRatingMenu(tx *sqlx.Tx, request SetRatingMenuRequest) error
-	SummaryReportTransactions(startDate string, endDate string) ([]SummaryReport, error)
+	SummaryReportTransactions(startDate string, endDate string) (*SummaryReportData, error)
 }
 
 type transactionService struct {
@@ -547,7 +547,7 @@ func (s *transactionService) SetRatingMenu(tx *sqlx.Tx, request SetRatingMenuReq
 	return nil
 }
 
-func (s *transactionService) SummaryReportTransactions(startDate string, endDate string) ([]SummaryReport, error) {
+func (s *transactionService) SummaryReportTransactions(startDate string, endDate string) (*SummaryReportData, error) {
 	return s.repo.SummaryReportTransactions(startDate, endDate)
 }
 

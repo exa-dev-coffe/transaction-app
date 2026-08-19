@@ -133,3 +133,25 @@ type SummaryReport struct {
 	TotalOrder int64   `json:"totalOrder" db:"total_order"`
 	CreatedAt  string  `json:"createdAt" db:"created_at"`
 }
+
+type OrderStatusBreakdown struct {
+	Status int `json:"status" db:"order_status"`
+	Count  int `json:"count" db:"count"`
+}
+
+type PeakHourBreakdown struct {
+	Hour  int `json:"hour" db:"hour"`
+	Count int `json:"count" db:"count"`
+}
+
+type TopMenu struct {
+	MenuId   int `json:"menuId" db:"menu_id"`
+	TotalQty int `json:"totalQty" db:"total_qty"`
+}
+
+type SummaryReportData struct {
+	DailyData       []SummaryReport        `json:"dailyData"`
+	StatusBreakdown []OrderStatusBreakdown `json:"statusBreakdown"`
+	PeakHours       []PeakHourBreakdown    `json:"peakHours"`
+	TopMenus        []TopMenu              `json:"topMenus"`
+}

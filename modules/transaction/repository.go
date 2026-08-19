@@ -21,7 +21,7 @@ type Repository interface {
 	GetOneTransactionByUserId(id int, userId int64) (*TransactionResponse, error)
 	UpdateOrderStatus(tx *sqlx.Tx, id int, updatedBy int64) error
 	SetRatingMenu(tx *sqlx.Tx, id int, rating int, updatedBy int64) (int, error)
-	SummaryReportTransactions(startDate string, endDate string) ([]SummaryReport, error)
+	SummaryReportTransactions(startDate string, endDate string) (*SummaryReportData, error)
 }
 
 type transactionRepository struct {
@@ -59,14 +59,12 @@ func (r *transactionRepository) GetListTransactionsPagination(params common.Para
 	var record = make([]TransactionResponse, 0)
 
 	common.BuildMappingField(&params, &mappingFieds)
-	log.Debug("Test", params.Search.Field, params.Search.Value, mappingFieds, params)
 	query := baseQuery
 	if startDate != "" && endDate != "" {
 		query += " WHERE CAST(t.created_at AS DATE) BETWEEN :start_date AND :end_date "
 	}
 
 	finalQuery, args := common.BuildFilterQuery(query, params, &mappingFiedType, " GROUP BY t.id ")
-	log.Debug("finalQuery : %v", finalQuery)
 	args["start_date"] = startDate
 	args["end_date"] = endDate
 
@@ -323,36 +321,69 @@ func (r *transactionRepository) SetRatingMenu(tx *sqlx.Tx, id int, rating int, u
 	return menuId, nil
 }
 
-func (r *transactionRepository) SummaryReportTransactions(startDate string, endDate string) ([]SummaryReport, error) {
-	var summary = make([]SummaryReport, 0)
-	query := `SELECT
-		SUM(t.total_price) AS total,  CAST(t.created_at AS DATE), COUNT(t.id) AS total_order				
-		FROM th_user_checkouts t
-		WHERE CAST(t.created_at AS DATE) BETWEEN $1 AND $2 group by CAST(t.created_at AS DATE)`
+func (r *transactionRepository) SummaryReportTransactions(startDate string, endDate string) (*SummaryReportData, error) {
+	result := &SummaryReportData{
+		DailyData:       make([]SummaryReport, 0),
+		StatusBreakdown: make([]OrderStatusBreakdown, 0),
+		PeakHours:       make([]PeakHourBreakdown, 0),
+		TopMenus:        make([]TopMenu, 0),
+	}
 
-	rows, err := r.db.Queryx(query, startDate, endDate)
+	// 1. Daily Data
+	queryDaily := `SELECT
+		SUM(t.total_price) AS total, CAST(t.created_at AS DATE) as created_at, COUNT(t.id) AS total_order				
+		FROM th_user_checkouts t
+		WHERE CAST(t.created_at AS DATE) BETWEEN $1 AND $2 
+		GROUP BY CAST(t.created_at AS DATE)
+		ORDER BY created_at ASC`
+
+	err := r.db.Select(&result.DailyData, queryDaily, startDate, endDate)
 	if err != nil {
-		log.Error("Failed to get summary report:", err)
+		log.Error("Failed to get daily summary report:", err)
 		return nil, response.InternalServerError("Failed to get summary report", nil)
 	}
-	defer func(rows *sqlx.Rows) {
-		err := rows.Close()
-		if err != nil {
-			log.Error("failed to close rows:", err)
-			return
-		}
-	}(rows)
 
-	for rows.Next() {
-		var report SummaryReport
-		if err := rows.StructScan(&report); err != nil {
-			log.Error("Failed to scan summary report:", err)
-			return nil, response.InternalServerError("Failed to scan summary report", nil)
-		}
-		summary = append(summary, report)
+	// 2. Status Breakdown
+	queryStatus := `SELECT
+		order_status, COUNT(id) as count
+		FROM th_user_checkouts
+		WHERE CAST(created_at AS DATE) BETWEEN $1 AND $2
+		GROUP BY order_status`
+
+	err = r.db.Select(&result.StatusBreakdown, queryStatus, startDate, endDate)
+	if err != nil {
+		log.Error("Failed to get status breakdown report:", err)
 	}
 
-	return summary, nil
+	// 3. Peak Hours Breakdown
+	queryPeak := `SELECT
+		EXTRACT(HOUR FROM created_at) as hour, COUNT(id) as count
+		FROM th_user_checkouts
+		WHERE CAST(created_at AS DATE) BETWEEN $1 AND $2
+		GROUP BY EXTRACT(HOUR FROM created_at)
+		ORDER BY hour ASC`
+
+	err = r.db.Select(&result.PeakHours, queryPeak, startDate, endDate)
+	if err != nil {
+		log.Error("Failed to get peak hours report:", err)
+	}
+
+	// 4. Top 5 Menus
+	queryTopMenus := `SELECT
+		td.menu_id, SUM(td.qty) as total_qty
+		FROM td_user_checkouts td
+		JOIN th_user_checkouts t ON td.ref_id = t.id
+		WHERE CAST(t.created_at AS DATE) BETWEEN $1 AND $2
+		GROUP BY td.menu_id
+		ORDER BY total_qty DESC
+		LIMIT 5`
+
+	err = r.db.Select(&result.TopMenus, queryTopMenus, startDate, endDate)
+	if err != nil {
+		log.Error("Failed to get top menus report:", err)
+	}
+
+	return result, nil
 }
 
 func validateAffectedRows(info sql.Result, message string) error {
