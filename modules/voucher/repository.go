@@ -145,7 +145,7 @@ func (r *voucherRepository) ListVouchers(params common.ParamsListRequest) (*resp
 		"id":   "int",
 		"code": "string",
 	}
-	common.BuildMappingField(params, &voucherMappingFields)
+	common.BuildMappingField(&params, &voucherMappingFields)
 	finalQuery, args := common.BuildFilterQuery(query, params, &voucherMappingFiedType, "")
 
 	rows, err := r.db.NamedQuery(finalQuery, args)

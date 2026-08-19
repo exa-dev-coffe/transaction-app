@@ -58,15 +58,15 @@ func (r *transactionRepository) InsertTdTransaction(tx *sqlx.Tx, transactionId i
 func (r *transactionRepository) GetListTransactionsPagination(params common.ParamsListRequest, startDate string, endDate string) (*response.Pagination[[]TransactionResponse], error) {
 	var record = make([]TransactionResponse, 0)
 
-	common.BuildMappingField(params, &mappingFieds)
-
+	common.BuildMappingField(&params, &mappingFieds)
+	log.Debug("Test", params.Search.Field, params.Search.Value, mappingFieds, params)
 	query := baseQuery
 	if startDate != "" && endDate != "" {
 		query += " WHERE CAST(t.created_at AS DATE) BETWEEN :start_date AND :end_date "
 	}
 
 	finalQuery, args := common.BuildFilterQuery(query, params, &mappingFiedType, " GROUP BY t.id ")
-
+	log.Debug("finalQuery : %v", finalQuery)
 	args["start_date"] = startDate
 	args["end_date"] = endDate
 
@@ -141,7 +141,7 @@ func (r *transactionRepository) GetListTransactionsPagination(params common.Para
 func (r *transactionRepository) GetListTransactionsNoPagination(request common.ParamsListRequest, startDate string, endDate string) ([]TransactionResponse, error) {
 	var record = make([]TransactionResponse, 0)
 
-	common.BuildMappingField(request, &mappingFieds)
+	common.BuildMappingField(&request, &mappingFieds)
 
 	query := baseQuery
 
@@ -198,7 +198,7 @@ func (r *transactionRepository) GetOneTransaction(id int) (*TransactionResponse,
 func (r *transactionRepository) GetListTransactionsByUserId(params common.ParamsListRequest, userId int64) (*response.Pagination[[]TransactionResponse], error) {
 	var record = make([]TransactionResponse, 0)
 
-	common.BuildMappingField(params, &mappingFieds)
+	common.BuildMappingField(&params, &mappingFieds)
 
 	finalQuery, args := common.BuildFilterQuery(baseQuery+" WHERE t.user_id = :user_id ", params, &mappingFiedType, " GROUP BY t.id ")
 

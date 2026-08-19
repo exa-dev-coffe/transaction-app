@@ -142,13 +142,19 @@ func BuildCountQuery(baseQuery string, params ParamsListRequest, mappingFieldTyp
 	return baseQuery, args
 }
 
-func BuildMappingField(params ParamsListRequest, mappingField *map[string]string) {
+func BuildMappingField(params *ParamsListRequest, mappingField *map[string]string) {
 	for i, field := range params.Search.Field {
 		if mapped, ok := (*mappingField)[field]; ok {
 			params.Search.Field[i] = mapped
 		} else {
 			log.Warn("Field ", field, " not found in mappingField")
 			params.Search.Field[i] = ""
+		}
+	}
+
+	if params.Sort.Field != "" {
+		if mapped, ok := (*mappingField)[params.Sort.Field]; ok {
+			params.Sort.Field = mapped
 		}
 	}
 }

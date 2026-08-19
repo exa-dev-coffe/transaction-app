@@ -31,9 +31,13 @@ var mappingFieds = map[string]string{
 	"id":          "t.id",
 	"orderStatus": "t.order_status",
 	"orderFor":    "t.order_for",
+	"createdAt":   "t.created_at",
+	"totalPrice":  "t.total_price",
 }
 var mappingFiedType = map[string]string{
 	"t.id":           "int",
 	"t.order_status": "int",
 	"t.order_for":    "string",
+	"t.created_at": "timestamp",
+	"t.total_price": "int",
 }
