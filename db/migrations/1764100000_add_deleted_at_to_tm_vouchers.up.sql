@@ -1,0 +1,1 @@
+ALTER TABLE tm_vouchers ADD COLUMN deleted_at TIMESTAMP DEFAULT NULL;

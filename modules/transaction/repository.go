@@ -12,7 +12,7 @@ import (
 
 type Repository interface {
 	// TODO: define repository methods
-	InsertThTransaction(tx *sqlx.Tx, transaction CreateTransactionRequest) (int, error)
+	InsertThTransaction(tx *sqlx.Tx, transaction CreateTransactionRequest, voucherId *int64, discountAmount float64) (int, error)
 	InsertTdTransaction(tx *sqlx.Tx, transactionId int, createdBy int64, data Data) error
 	GetListTransactionsPagination(params common.ParamsListRequest, startDate string, endDate string) (*response.Pagination[[]TransactionResponse], error)
 	GetListTransactionsNoPagination(request common.ParamsListRequest, startDate string, endDate string) ([]TransactionResponse, error)
@@ -32,11 +32,11 @@ func NewTransactionRepository(db *sqlx.DB) Repository {
 	return &transactionRepository{db: db}
 }
 
-func (r *transactionRepository) InsertThTransaction(tx *sqlx.Tx, transaction CreateTransactionRequest) (int, error) {
+func (r *transactionRepository) InsertThTransaction(tx *sqlx.Tx, transaction CreateTransactionRequest, voucherId *int64, discountAmount float64) (int, error) {
 	var id int
-	query := `INSERT INTO th_user_checkouts (user_id, table_id, order_for, total_price, created_by) VALUES ($1, $2, $3, $4, $5) RETURNING id`
+	query := `INSERT INTO th_user_checkouts (user_id, table_id, order_for, total_price, created_by, voucher_id, discount_amount) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`
 
-	err := tx.QueryRow(query, transaction.CreatedBy, transaction.TableId, transaction.OrderFor, transaction.Total, transaction.CreatedBy).Scan(&id)
+	err := tx.QueryRow(query, transaction.CreatedBy, transaction.TableId, transaction.OrderFor, transaction.Total, transaction.CreatedBy, voucherId, discountAmount).Scan(&id)
 	if err != nil {
 		log.Error("Failed to insert transaction:", err)
 		return 0, response.InternalServerError("Failed to insert transaction", nil)

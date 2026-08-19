@@ -11,6 +11,7 @@ import (
 
 	"eka-dev.cloud/transaction-service/config"
 	"eka-dev.cloud/transaction-service/lib"
+	"eka-dev.cloud/transaction-service/modules/voucher"
 	"eka-dev.cloud/transaction-service/utils"
 	"eka-dev.cloud/transaction-service/utils/common"
 	"eka-dev.cloud/transaction-service/utils/response"
@@ -33,12 +34,13 @@ type Service interface {
 }
 
 type transactionService struct {
-	repo Repository
-	db   *sqlx.DB
+	repo           Repository
+	voucherService voucher.Service
+	db             *sqlx.DB
 }
 
-func NewTransactionService(repo Repository, db *sqlx.DB) Service {
-	return &transactionService{repo: repo, db: db}
+func NewTransactionService(repo Repository, voucherService voucher.Service, db *sqlx.DB) Service {
+	return &transactionService{repo: repo, voucherService: voucherService, db: db}
 }
 
 func (s *transactionService) CreateTransaction(tx *sqlx.Tx, request CreateTransactionRequest) error {
@@ -61,14 +63,34 @@ func (s *transactionService) CreateTransaction(tx *sqlx.Tx, request CreateTransa
 
 	request.Total = calculateTotalPriceMenu(menus, &request)
 
+	var voucherId *int64 = nil
+	var discountAmount float64 = 0
+
+	if request.VoucherCode != "" {
+		vId, discount, err := s.voucherService.ValidateVoucherForCheckout(tx, request.VoucherCode, request.Total, request.CreatedBy)
+		if err != nil {
+			return err
+		}
+		discountAmount = discount
+		voucherId = &vId
+		request.Total -= discountAmount
+	}
+
 	err = paymentUseWallet(request.CreatedBy, request.Total, request.Pin)
 	if err != nil {
 		return err
 	}
 
-	id, err := s.repo.InsertThTransaction(tx, request)
+	id, err := s.repo.InsertThTransaction(tx, request, voucherId, discountAmount)
 	if err != nil {
 		return err
+	}
+
+	if voucherId != nil {
+		err = s.voucherService.LogVoucherUsage(tx, request.CreatedBy, *voucherId, int64(id), discountAmount)
+		if err != nil {
+			return err
+		}
 	}
 
 	for i := range request.Datas {
@@ -691,3 +713,4 @@ func getUsersNameByIds(ids string) ([]UserResponse, error) {
 
 	return data.Data, nil
 }
+

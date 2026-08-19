@@ -11,6 +11,7 @@ import (
 	_ "eka-dev.cloud/transaction-service/lib"
 	"eka-dev.cloud/transaction-service/middleware"
 	"eka-dev.cloud/transaction-service/modules/transaction"
+	"eka-dev.cloud/transaction-service/modules/voucher"
 	"eka-dev.cloud/transaction-service/utils/response"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
@@ -39,6 +40,9 @@ func main() {
 }
 
 func initiator() {
+	// Initialize Asynq Client
+	lib.InitAsynq()
+
 	// Initialize the fiber app
 	fiberApp := fiber.New(fiber.Config{
 		ErrorHandler: middleware.ErrorHandler,
@@ -68,9 +72,14 @@ func initiator() {
 		AllowMethods: "GET, POST, PUT, DELETE, OPTIONS, PATCH",
 	}))
 
-	// Initialize routes
-	// Menus
-	transaction.NewHandler(fiberApp, db.DB)
+	// Initialize modules
+	voucherRepo := voucher.NewVoucherRepository(db.DB)
+	voucherService := voucher.NewVoucherService(voucherRepo, db.DB)
+	voucher.NewHandler(fiberApp, voucherService)
+
+	transactionRepo := transaction.NewTransactionRepository(db.DB)
+	transactionService := transaction.NewTransactionService(transactionRepo, voucherService, db.DB)
+	transaction.NewHandler(fiberApp, transactionService, db.DB)
 
 	fiberApp.All("*", func(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusNotFound).JSON(response.NotFound("Route not found", nil))

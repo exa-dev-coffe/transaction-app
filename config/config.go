@@ -29,6 +29,9 @@ type appConfig struct {
 	AllowedOrigins       string
 	RabbitmqUrl          string
 	ServiceAccountUrl    string
+	RedisUrl             string
+	RedisPassword        string
+	ServiceTransactionUrl string
 }
 
 var Config appConfig
@@ -65,5 +68,11 @@ func init() {
 		AllowedOrigins:       viper.GetString("ALLOWED_ORIGINS"),
 		RabbitmqUrl:          viper.GetString("RABBITMQ_URL"),
 		ServiceAccountUrl:    viper.GetString("SERVICE_ACCOUNT_URL"),
+		RedisUrl:             viper.GetString("REDIS_URL"),
+		RedisPassword:        viper.GetString("REDIS_PASSWORD"),
+		ServiceTransactionUrl: viper.GetString("SERVICE_TRANSACTION_URL"),
+	}
+	if Config.ServiceTransactionUrl == "" {
+		Config.ServiceTransactionUrl = "http://localhost:8084"
 	}
 }

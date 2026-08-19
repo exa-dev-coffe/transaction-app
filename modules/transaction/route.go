@@ -27,9 +27,7 @@ type handler struct {
 	db      *sqlx.DB
 }
 
-func NewHandler(app *fiber.App, db *sqlx.DB) Handler {
-	repo := NewTransactionRepository(db)
-	service := NewTransactionService(repo, db)
+func NewHandler(app *fiber.App, service Service, db *sqlx.DB) Handler {
 	h := &handler{service: service, db: db}
 
 	routes := app.Group("/api/1.0")
@@ -41,8 +39,6 @@ func NewHandler(app *fiber.App, db *sqlx.DB) Handler {
 	routes.Patch("/transactions/update-order-status", middleware.RequireRole("admin", "barista"), h.UpdateOrderStatus)
 	routes.Patch("/history-checkouts/set-rating-menu", middleware.RequireAuth, h.SetRatingMenu)
 	routes.Get("/transactions/summary-report", middleware.RequireRole("admin", "barista"), h.SummaryReportTransactions)
-
-	// routes.Get("", h.GetSomething)
 
 	return h
 }

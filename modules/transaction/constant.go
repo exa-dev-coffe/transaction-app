@@ -8,6 +8,8 @@ SELECT
 	t.order_status,
 	t.user_id,
 	t.order_for,
+	t.voucher_id,
+	t.discount_amount,
 	t.created_at,
 	t.updated_at,
 	JSON_AGG(

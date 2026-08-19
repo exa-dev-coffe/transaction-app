@@ -53,12 +53,13 @@ type Data struct {
 }
 
 type CreateTransactionRequest struct {
-	TableId   int64   `json:"tableId" validate:"required"`
-	OrderFor  string  `json:"orderFor" validate:"required"`
-	Pin       string  `json:"pin" validate:"required,len=6,numeric"`
-	Datas     []Data  `json:"datas" validate:"required,dive,required"`
-	Total     float64 `json:"total"`
-	CreatedBy int64   `json:"createdBy"`
+	TableId     int64   `json:"tableId" validate:"required"`
+	OrderFor    string  `json:"orderFor" validate:"required"`
+	Pin         string  `json:"pin" validate:"required,len=6,numeric"`
+	VoucherCode string  `json:"voucherCode"`
+	Datas       []Data  `json:"datas" validate:"required,dive,required"`
+	Total       float64 `json:"total"`
+	CreatedBy   int64   `json:"createdBy"`
 }
 
 type PaymentRequest struct {
@@ -68,17 +69,19 @@ type PaymentRequest struct {
 }
 
 type TransactionResponse struct {
-	Id          int64                   `json:"id" db:"id"`
-	OrderStatus int8                    `json:"orderStatus" db:"order_status"`
-	TotalPrice  float64                 `json:"totalPrice" db:"total_price"`
-	OrderFor    string                  `json:"orderFor" db:"order_for"`
-	OrderBy     string                  `json:"orderBy"`
-	UserId      int64                   `json:"userId" db:"user_id"`
-	TableName   string                  `json:"tableName"`
-	CreatedAt   string                  `json:"createdAt" db:"created_at"`
-	UpdatedAt   string                  `json:"updatedAt" db:"updated_at"`
-	TableId     int64                   `json:"tableId" db:"table_id"`
-	Details     JSONBTransactionDetails `json:"details" db:"details"`
+	Id             int64                   `json:"id" db:"id"`
+	OrderStatus    int8                    `json:"orderStatus" db:"order_status"`
+	TotalPrice     float64                 `json:"totalPrice" db:"total_price"`
+	OrderFor       string                  `json:"orderFor" db:"order_for"`
+	OrderBy        string                  `json:"orderBy"`
+	UserId         int64                   `json:"userId" db:"user_id"`
+	TableName      string                  `json:"tableName"`
+	CreatedAt      string                  `json:"createdAt" db:"created_at"`
+	UpdatedAt      string                  `json:"updatedAt" db:"updated_at"`
+	TableId        int64                   `json:"tableId" db:"table_id"`
+	VoucherId      *int64                  `json:"voucherId" db:"voucher_id"`
+	DiscountAmount float64                 `json:"discountAmount" db:"discount_amount"`
+	Details        JSONBTransactionDetails `json:"details" db:"details"`
 }
 
 type JSONBTransactionDetails []TransactionDetail
