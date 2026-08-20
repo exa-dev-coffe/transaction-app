@@ -44,3 +44,13 @@ cp .env.example .env
     ```bash
     go run main.go
     ```
+
+## 🧪 Integration Testing
+
+Jalankan perintah berikut untuk mengeksekusi pengujian seluruh endpoint transaksi, checkout, voucher, rating, dan report:
+
+```bash
+go test -v .
+```
+
+*Persyaratan:* Docker Desktop/Daemon harus aktif.
