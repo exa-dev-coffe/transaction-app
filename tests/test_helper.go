@@ -3,6 +3,7 @@ package tests
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -29,6 +30,8 @@ import (
 
 func SetupTestPostgresTransaction(t *testing.T) (*sqlx.DB, func()) {
 	ctx := context.Background()
+
+	// 1. PostgreSQL Testcontainer
 	postgresContainer, err := postgres.Run(ctx,
 		"postgres:15-alpine",
 		postgres.WithDatabase("transaction_test"),
@@ -69,9 +72,28 @@ func SetupTestPostgresTransaction(t *testing.T) (*sqlx.DB, func()) {
 	// Set package db.DB global pointer to real test DB
 	db.DB = dbConn
 
+	// 2. Real RabbitMQ Testcontainer
+	rmqReq := testcontainers.ContainerRequest{
+		Image:        "rabbitmq:3-alpine",
+		ExposedPorts: []string{"5672/tcp"},
+		WaitingFor:   wait.ForLog("Server startup complete").WithStartupTimeout(45 * time.Second),
+	}
+	rmqContainer, rmqErr := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
+		ContainerRequest: rmqReq,
+		Started:          true,
+	})
+	if rmqErr == nil {
+		host, _ := rmqContainer.Host(ctx)
+		port, _ := rmqContainer.MappedPort(ctx, "5672")
+		config.Config.RabbitmqUrl = fmt.Sprintf("amqp://guest:guest@%s:%s/", host, port.Port())
+	}
+
 	teardown := func() {
 		_ = dbConn.Close()
 		_ = postgresContainer.Terminate(ctx)
+		if rmqContainer != nil {
+			_ = rmqContainer.Terminate(ctx)
+		}
 	}
 
 	return dbConn, teardown
