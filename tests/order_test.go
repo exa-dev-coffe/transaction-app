@@ -21,12 +21,12 @@ func TestOrderCheckoutSuite(t *testing.T) {
 	customerToken := GenerateTestToken(100, "user@test.com", "customer")
 	adminToken := GenerateTestToken(1, "admin@test.com", "admin")
 
-	// Seed prerequisite transaction data into PostgreSQL Test Database
+	// Seed prerequisite transaction data with order_status = 1 (PENDING) into PostgreSQL
 	_, err := dbConn.Exec(`
 		INSERT INTO th_user_checkouts (id, user_id, order_status, total_price, order_for, table_id, created_by)
-		VALUES (101, 100, 1, 50000.00, 'Dine In', 1, 100) ON CONFLICT (id) DO NOTHING;
+		VALUES (201, 100, 1, 50000.00, 'Dine In', 1, 100) ON CONFLICT (id) DO NOTHING;
 		INSERT INTO td_user_checkouts (id, ref_id, menu_id, qty, price, total_price)
-		VALUES (501, 101, 10, 2, 25000.00, 50000.00) ON CONFLICT (id) DO NOTHING;
+		VALUES (601, 201, 10, 2, 25000.00, 50000.00) ON CONFLICT (id) DO NOTHING;
 	`)
 	if err != nil {
 		t.Fatalf("Failed to seed prerequisite test data: %v", err)
@@ -69,7 +69,7 @@ func TestOrderCheckoutSuite(t *testing.T) {
 	})
 
 	t.Run("GET /transactions/detail - Admin Get Transaction Detail", func(t *testing.T) {
-		resp, err := ExecuteTestRequest(app, "GET", "/api/1.0/transactions/detail?id=101", nil, adminToken)
+		resp, err := ExecuteTestRequest(app, "GET", "/api/1.0/transactions/detail?id=201", nil, adminToken)
 		if err != nil {
 			t.Fatalf("Request failed: %v", err)
 		}
@@ -80,7 +80,7 @@ func TestOrderCheckoutSuite(t *testing.T) {
 	})
 
 	t.Run("PATCH /transactions/update-order-status - Admin Update Order Status", func(t *testing.T) {
-		body := []byte(`{"id": 101}`)
+		body := []byte(`{"id": 201}`)
 		resp, err := ExecuteTestRequest(app, "PATCH", "/api/1.0/transactions/update-order-status", body, adminToken)
 		if err != nil {
 			t.Fatalf("Request failed: %v", err)

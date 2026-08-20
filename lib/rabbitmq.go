@@ -84,6 +84,15 @@ func GetConnection() *amqp.Connection {
 	return conn
 }
 
+func ResetConnection() {
+	mu.Lock()
+	defer mu.Unlock()
+	if conn != nil {
+		_ = conn.Close()
+		conn = nil
+	}
+}
+
 // GetChannel -> bikin channel baru (safe untuk goroutine)
 func GetChannel() (*amqp.Channel, error) {
 	c := GetConnection()
