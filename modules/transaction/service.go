@@ -362,10 +362,10 @@ func (s *transactionService) GetOneTransaction(request *common.OneRequest) (*Tra
 				}
 			}
 		}
-		if res.TableId == dataMenusAndTable.Tables[0].Id {
+		if len(dataMenusAndTable.Tables) > 0 && res.TableId == dataMenusAndTable.Tables[0].Id {
 			res.TableName = dataMenusAndTable.Tables[0].Name
 		}
-		if res.UserId == dataUsers[0].UserId {
+		if len(dataUsers) > 0 && res.UserId == dataUsers[0].UserId {
 			res.OrderBy = dataUsers[0].FullName
 		}
 	}
@@ -463,7 +463,7 @@ func (s *transactionService) GetOneTransactionByUserId(request *common.OneReques
 				}
 			}
 		}
-		if res.TableId == dataMenusAndTable.Tables[0].Id {
+		if len(dataMenusAndTable.Tables) > 0 && res.TableId == dataMenusAndTable.Tables[0].Id {
 			res.TableName = dataMenusAndTable.Tables[0].Name
 		}
 	}
@@ -532,8 +532,8 @@ func (s *transactionService) SetRatingMenu(tx *sqlx.Tx, request SetRatingMenuReq
 
 	ch, err := lib.GetChannel()
 	if err != nil {
-		log.Error("Failed to get channel:", err)
-		return response.InternalServerError("Internal Server Error", nil)
+		log.Error("Failed to get RabbitMQ channel:", err)
+		return nil
 	}
 	payload := []byte(fmt.Sprintf(`{"id": %d, "rating": %d, "updatedBy": %d}`, idMenu, request.Rating, request.UpdatedBy))
 	err = lib.SendMessage(ch, "menu.set_rating", "menu.set_rating", "", lib.ExchangeDirect, amqp.Publishing{
@@ -541,7 +541,8 @@ func (s *transactionService) SetRatingMenu(tx *sqlx.Tx, request SetRatingMenuReq
 		Body:        payload,
 	}, string(payload), true, false, false, amqp.Table{})
 	if err != nil {
-		return err
+		log.Error("Failed to send rating message to RabbitMQ:", err)
+		return nil
 	}
 
 	return nil

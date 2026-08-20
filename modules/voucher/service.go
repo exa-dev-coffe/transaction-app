@@ -166,12 +166,14 @@ func (s *voucherService) CreateVoucher(tx *sqlx.Tx, request CreateVoucherRequest
 		return id, nil
 	}
 
-	task := asynq.NewTask("task:http_post", payload)
-	_, err = lib.AsynqClient.Enqueue(task, asynq.ProcessAt(expireTime))
-	if err != nil {
-		log.Error("Failed to enqueue deactivation task in Asynq: ", err)
-	} else {
-		log.Infof("Scheduled deactivation task for Voucher ID %d at %s", id, expireTime.Format(time.RFC3339))
+	if lib.AsynqClient != nil {
+		task := asynq.NewTask("task:http_post", payload)
+		_, err = lib.AsynqClient.Enqueue(task, asynq.ProcessAt(expireTime))
+		if err != nil {
+			log.Error("Failed to enqueue deactivation task in Asynq: ", err)
+		} else {
+			log.Infof("Scheduled deactivation task for Voucher ID %d at %s", id, expireTime.Format(time.RFC3339))
+		}
 	}
 
 	return id, nil

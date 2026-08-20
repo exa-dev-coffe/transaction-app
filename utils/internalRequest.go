@@ -18,6 +18,8 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+var HTTPClient *http.Client
+
 func InternalRequest(signature string, timestamp string, url string, method string, body io.Reader) ([]byte, error) {
 	req, err := http.NewRequest(method, url, body)
 	if err != nil {
@@ -42,7 +44,10 @@ func InternalRequest(signature string, timestamp string, url string, method stri
 	// Inject W3C Trace Context (traceparent, tracestate) into outgoing HTTP headers
 	otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(req.Header))
 
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := HTTPClient
+	if client == nil {
+		client = &http.Client{Timeout: 10 * time.Second}
+	}
 	res, err := client.Do(req.WithContext(ctx))
 	if err != nil {
 		span.RecordError(err)

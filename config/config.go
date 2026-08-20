@@ -72,6 +72,15 @@ func init() {
 		RedisPassword:        viper.GetString("REDIS_PASSWORD"),
 		ServiceTransactionUrl: viper.GetString("SERVICE_TRANSACTION_URL"),
 	}
+	if Config.ServiceMasterDataUrl == "" {
+		Config.ServiceMasterDataUrl = "http://localhost:8080"
+	}
+	if Config.ServiceWalletUrl == "" {
+		Config.ServiceWalletUrl = "http://localhost:8082"
+	}
+	if Config.ServiceAccountUrl == "" {
+		Config.ServiceAccountUrl = "http://localhost:8081"
+	}
 	if Config.ServiceTransactionUrl == "" {
 		Config.ServiceTransactionUrl = "http://localhost:8084"
 	}

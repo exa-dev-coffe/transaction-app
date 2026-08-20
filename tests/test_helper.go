@@ -77,6 +77,51 @@ func SetupTestPostgresTransaction(t *testing.T) (*sqlx.DB, func()) {
 	return dbConn, teardown
 }
 
+func SetupMockExternalServices() *httptest.Server {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+
+		switch r.URL.Path {
+		case "/api/internal/available-menus-table":
+			_, _ = w.Write([]byte(`{
+				"success": true,
+				"message": "Success",
+				"data": [
+					{"id": 10, "name": "Espresso", "price": 25000, "description": "Coffee", "photo": "coffee.jpg"}
+				]
+			}`))
+		case "/api/internal/data-menus-table":
+			_, _ = w.Write([]byte(`{
+				"success": true,
+				"message": "Success",
+				"data": {
+					"menus": [{"id": 10, "name": "Espresso", "price": 25000, "description": "Coffee", "photo": "coffee.jpg"}],
+					"tables": [{"id": 1, "name": "Table 1"}, {"id": 3, "name": "Table 3"}]
+				}
+			}`))
+		case "/api/internal/name-users":
+			_, _ = w.Write([]byte(`{
+				"success": true,
+				"message": "Success",
+				"data": [
+					{"userId": 100, "fullName": "Test User", "email": "user@test.com"}
+				]
+			}`))
+		case "/api/internal/pay":
+			_, _ = w.Write([]byte(`{"success": true, "message": "Payment successful"}`))
+		default:
+			_, _ = w.Write([]byte(`{"success": true, "message": "Success"}`))
+		}
+	}))
+
+	config.Config.ServiceMasterDataUrl = server.URL
+	config.Config.ServiceWalletUrl = server.URL
+	config.Config.ServiceAccountUrl = server.URL
+
+	return server
+}
+
 func SetupTestApp(dbConn *sqlx.DB) *fiber.App {
 	app := fiber.New(fiber.Config{
 		ErrorHandler: middleware.ErrorHandler,

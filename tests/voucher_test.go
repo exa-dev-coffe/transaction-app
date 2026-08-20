@@ -2,6 +2,7 @@ package tests
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"testing"
 )
@@ -44,7 +45,7 @@ func TestVoucherSuite(t *testing.T) {
 		t.Fatalf("Failed to seed real test vouchers into PostgreSQL: %v", err)
 	}
 
-	t.Run("Validate Voucher - 10% Percentage Discount", func(t *testing.T) {
+	t.Run("POST /transactions/validate-voucher - 10% Percentage Discount", func(t *testing.T) {
 		body := []byte(`{"code":"DISCOUNT10","orderTotal":100000}`)
 		resp, err := ExecuteTestRequest(app, "POST", "/api/1.0/transactions/validate-voucher", body, customerToken)
 		if err != nil {
@@ -69,7 +70,7 @@ func TestVoucherSuite(t *testing.T) {
 		}
 	})
 
-	t.Run("Validate Voucher - Fixed 20K Discount", func(t *testing.T) {
+	t.Run("POST /transactions/validate-voucher - Fixed 20K Discount", func(t *testing.T) {
 		body := []byte(`{"code":"HEMAT20K","orderTotal":75000}`)
 		resp, err := ExecuteTestRequest(app, "POST", "/api/1.0/transactions/validate-voucher", body, customerToken)
 		if err != nil {
@@ -94,7 +95,7 @@ func TestVoucherSuite(t *testing.T) {
 		}
 	})
 
-	t.Run("Validate Voucher - Min Purchase Not Met", func(t *testing.T) {
+	t.Run("POST /transactions/validate-voucher - Min Purchase Not Met", func(t *testing.T) {
 		body := []byte(`{"code":"MIN100K","orderTotal":50000}`)
 		resp, err := ExecuteTestRequest(app, "POST", "/api/1.0/transactions/validate-voucher", body, customerToken)
 		if err != nil {
@@ -110,7 +111,7 @@ func TestVoucherSuite(t *testing.T) {
 		}
 	})
 
-	t.Run("Validate Voucher - Quota Reached", func(t *testing.T) {
+	t.Run("POST /transactions/validate-voucher - Quota Reached", func(t *testing.T) {
 		body := []byte(`{"code":"SOLD_OUT","orderTotal":50000}`)
 		resp, err := ExecuteTestRequest(app, "POST", "/api/1.0/transactions/validate-voucher", body, customerToken)
 		if err != nil {
@@ -126,7 +127,7 @@ func TestVoucherSuite(t *testing.T) {
 		}
 	})
 
-	t.Run("Validate Voucher - Already Used", func(t *testing.T) {
+	t.Run("POST /transactions/validate-voucher - Already Used", func(t *testing.T) {
 		body := []byte(`{"code":"ONCE_ONLY","orderTotal":50000}`)
 		resp, err := ExecuteTestRequest(app, "POST", "/api/1.0/transactions/validate-voucher", body, customerToken)
 		if err != nil {
@@ -142,13 +143,74 @@ func TestVoucherSuite(t *testing.T) {
 		}
 	})
 
-	t.Run("Get List Vouchers", func(t *testing.T) {
-		resp, err := ExecuteTestRequest(app, "GET", "/api/1.0/vouchers", nil, adminToken)
+	t.Run("POST /vouchers - Admin Create Voucher", func(t *testing.T) {
+		body := []byte(`{
+			"code": "NEWPROMO30",
+			"discountType": "PERCENTAGE",
+			"discountValue": 30.0,
+			"maxDiscount": 20000.0,
+			"minPurchase": 50000.0,
+			"quota": 20,
+			"expiredAt": "2030-12-31 23:59:59"
+		}`)
+		resp, err := ExecuteTestRequest(app, "POST", "/api/1.0/vouchers", body, adminToken)
+		if err != nil {
+			t.Fatalf("Request failed: %v", err)
+		}
+		if resp.StatusCode != 201 {
+			t.Fatalf("Expected HTTP 201 Created, got %v", resp.StatusCode)
+		}
+
+		// Verify record created in PostgreSQL DB
+		var count int
+		_ = dbConn.Get(&count, "SELECT count(*) FROM tm_vouchers WHERE code = 'NEWPROMO30'")
+		if count != 1 {
+			t.Errorf("Expected 1 voucher with code NEWPROMO30 in PostgreSQL DB, got %d", count)
+		}
+	})
+
+	t.Run("GET /vouchers - Admin Get List Vouchers", func(t *testing.T) {
+		resp, err := ExecuteTestRequest(app, "GET", "/api/1.0/vouchers?page=1&size=10", nil, adminToken)
 		if err != nil {
 			t.Fatalf("Request failed: %v", err)
 		}
 		if resp.StatusCode != 200 {
 			t.Fatalf("Expected HTTP 200 OK, got %v", resp.StatusCode)
+		}
+	})
+
+	t.Run("PATCH /vouchers/:id/status - Admin Update Voucher Status", func(t *testing.T) {
+		body := []byte(`{"isActive": false}`)
+		url := fmt.Sprintf("/api/1.0/vouchers/10/status")
+		resp, err := ExecuteTestRequest(app, "PATCH", url, body, adminToken)
+		if err != nil {
+			t.Fatalf("Request failed: %v", err)
+		}
+		if resp.StatusCode != 200 {
+			t.Fatalf("Expected HTTP 200 OK, got %v", resp.StatusCode)
+		}
+
+		var isActive bool
+		_ = dbConn.Get(&isActive, "SELECT is_active FROM tm_vouchers WHERE id = 10")
+		if isActive != false {
+			t.Errorf("Expected voucher 10 is_active to be false in PostgreSQL DB")
+		}
+	})
+
+	t.Run("DELETE /vouchers/:id - Admin Delete Voucher", func(t *testing.T) {
+		url := fmt.Sprintf("/api/1.0/vouchers/11")
+		resp, err := ExecuteTestRequest(app, "DELETE", url, nil, adminToken)
+		if err != nil {
+			t.Fatalf("Request failed: %v", err)
+		}
+		if resp.StatusCode != 200 {
+			t.Fatalf("Expected HTTP 200 OK, got %v", resp.StatusCode)
+		}
+
+		var deletedAt *string
+		_ = dbConn.Get(&deletedAt, "SELECT deleted_at FROM tm_vouchers WHERE id = 11")
+		if deletedAt == nil {
+			t.Errorf("Expected voucher 11 deleted_at to be populated in PostgreSQL DB")
 		}
 	})
 }
