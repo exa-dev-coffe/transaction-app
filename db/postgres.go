@@ -19,7 +19,8 @@ func init() {
 	log.Println("databases init")
 	dsn := config.Config.DBUrl
 	if dsn == "" {
-		log.Fatalln("Database DSN is not set")
+		log.Println("Database DSN is not set, skipping default DB initialization for test environment")
+		return
 	}
 
 	// Register and open with otelsql

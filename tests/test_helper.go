@@ -1,4 +1,4 @@
-package main
+package tests
 
 import (
 	"bytes"
@@ -11,12 +11,15 @@ import (
 	"testing"
 	"time"
 
+	"eka-dev.cloud/transaction-service/config"
 	"eka-dev.cloud/transaction-service/db"
 	"eka-dev.cloud/transaction-service/middleware"
 	"eka-dev.cloud/transaction-service/modules/transaction"
 	"eka-dev.cloud/transaction-service/modules/voucher"
+	"eka-dev.cloud/transaction-service/utils/common"
 	"eka-dev.cloud/transaction-service/utils/response"
 	"github.com/gofiber/fiber/v2"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
 	"github.com/testcontainers/testcontainers-go"
@@ -24,7 +27,7 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 )
 
-func setupTestPostgresTransaction(t *testing.T) (*sqlx.DB, func()) {
+func SetupTestPostgresTransaction(t *testing.T) (*sqlx.DB, func()) {
 	ctx := context.Background()
 	postgresContainer, err := postgres.Run(ctx,
 		"postgres:15-alpine",
@@ -51,7 +54,10 @@ func setupTestPostgresTransaction(t *testing.T) (*sqlx.DB, func()) {
 	}
 
 	// Apply all .up.sql database schema migrations
-	migrationFiles, _ := filepath.Glob("db/migrations/*.up.sql")
+	migrationFiles, _ := filepath.Glob("../db/migrations/*.up.sql")
+	if len(migrationFiles) == 0 {
+		migrationFiles, _ = filepath.Glob("db/migrations/*.up.sql")
+	}
 	sort.Strings(migrationFiles)
 	for _, f := range migrationFiles {
 		sqlContent, err := os.ReadFile(f)
@@ -71,7 +77,7 @@ func setupTestPostgresTransaction(t *testing.T) (*sqlx.DB, func()) {
 	return dbConn, teardown
 }
 
-func setupTestApp(dbConn *sqlx.DB) *fiber.App {
+func SetupTestApp(dbConn *sqlx.DB) *fiber.App {
 	app := fiber.New(fiber.Config{
 		ErrorHandler: middleware.ErrorHandler,
 	})
@@ -96,7 +102,24 @@ func setupTestApp(dbConn *sqlx.DB) *fiber.App {
 	return app
 }
 
-func executeTestRequest(app *fiber.App, method, url string, body []byte) (*http.Response, error) {
+func GenerateTestToken(userId int64, email, role string) string {
+	claims := common.Claims{
+		FullName: "Test User",
+		Email:    email,
+		UserId:   userId,
+		Type:     "ACCESS",
+		Role:     role,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+		},
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	tokenString, _ := token.SignedString([]byte(config.Config.SecretJwt))
+	return tokenString
+}
+
+func ExecuteTestRequest(app *fiber.App, method, url string, body []byte, token string) (*http.Response, error) {
 	var req *http.Request
 	if len(body) > 0 {
 		req = httptest.NewRequest(method, url, bytes.NewBuffer(body))
@@ -104,5 +127,10 @@ func executeTestRequest(app *fiber.App, method, url string, body []byte) (*http.
 	} else {
 		req = httptest.NewRequest(method, url, nil)
 	}
+
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+
 	return app.Test(req)
 }

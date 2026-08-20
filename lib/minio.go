@@ -16,6 +16,10 @@ var minioClient *minio.Client
 func init() {
 	log.Info("Lib initialized minio")
 	endpoint := config.Config.MinioEndpoint
+	if endpoint == "" {
+		log.Warn("MinIO endpoint is empty, skipping client initialization")
+		return
+	}
 	accessKey := config.Config.MinioAccessKey
 	secretKey := config.Config.MinioSecretKey
 	useSSL := config.Config.MinioUseSSL
