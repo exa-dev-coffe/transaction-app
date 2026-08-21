@@ -18,6 +18,43 @@ type validateVoucherResponse struct {
 	} `json:"data"`
 }
 
+type createVoucherResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+	Data    struct {
+		ID int64 `json:"id"`
+	} `json:"data"`
+}
+
+type voucherItem struct {
+	ID            int64   `json:"id"`
+	Code          string  `json:"code"`
+	DiscountType  string  `json:"discountType"`
+	DiscountValue float64 `json:"discountValue"`
+	MaxDiscount   float64 `json:"maxDiscount"`
+	MinPurchase   float64 `json:"minPurchase"`
+	Quota         int     `json:"quota"`
+	IsActive      bool    `json:"isActive"`
+}
+
+type getListVouchersResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+	Data    struct {
+		Data        []voucherItem `json:"data"`
+		TotalData   int           `json:"totalData"`
+		TotalPages  int           `json:"totalPages"`
+		CurrentPage int           `json:"currentPage"`
+		PageSize    int           `json:"pageSize"`
+		LastPage    bool          `json:"lastPage"`
+	} `json:"data"`
+}
+
+type genericResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+}
+
 func TestVoucherSuite(t *testing.T) {
 	dbConn, teardown := SetupTestPostgresTransaction(t)
 	defer teardown()
@@ -57,8 +94,16 @@ func TestVoucherSuite(t *testing.T) {
 
 		respBody, _ := io.ReadAll(resp.Body)
 		var res validateVoucherResponse
-		_ = json.Unmarshal(respBody, &res)
+		if err := json.Unmarshal(respBody, &res); err != nil {
+			t.Fatalf("Failed to parse response JSON: %v", err)
+		}
 
+		if !res.Success {
+			t.Errorf("Expected success to be true, got false")
+		}
+		if res.Message != "Success" {
+			t.Errorf("Expected message 'Success', got '%s'", res.Message)
+		}
 		if !res.Data.Valid {
 			t.Fatalf("Expected voucher DISCOUNT10 to be valid")
 		}
@@ -67,6 +112,9 @@ func TestVoucherSuite(t *testing.T) {
 		}
 		if res.Data.FinalTotal != 90000 {
 			t.Errorf("Expected finalTotal 90000, got %f", res.Data.FinalTotal)
+		}
+		if res.Data.Message != "Voucher applied successfully" {
+			t.Errorf("Expected data message 'Voucher applied successfully', got '%s'", res.Data.Message)
 		}
 	})
 
@@ -82,8 +130,16 @@ func TestVoucherSuite(t *testing.T) {
 
 		respBody, _ := io.ReadAll(resp.Body)
 		var res validateVoucherResponse
-		_ = json.Unmarshal(respBody, &res)
+		if err := json.Unmarshal(respBody, &res); err != nil {
+			t.Fatalf("Failed to parse response JSON: %v", err)
+		}
 
+		if !res.Success {
+			t.Errorf("Expected success to be true, got false")
+		}
+		if res.Message != "Success" {
+			t.Errorf("Expected message 'Success', got '%s'", res.Message)
+		}
 		if !res.Data.Valid {
 			t.Fatalf("Expected voucher HEMAT20K to be valid")
 		}
@@ -93,6 +149,9 @@ func TestVoucherSuite(t *testing.T) {
 		if res.Data.FinalTotal != 55000 {
 			t.Errorf("Expected finalTotal 55000, got %f", res.Data.FinalTotal)
 		}
+		if res.Data.Message != "Voucher applied successfully" {
+			t.Errorf("Expected data message 'Voucher applied successfully', got '%s'", res.Data.Message)
+		}
 	})
 
 	t.Run("POST /transactions/validate-voucher - Min Purchase Not Met", func(t *testing.T) {
@@ -101,13 +160,24 @@ func TestVoucherSuite(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Request failed: %v", err)
 		}
+		if resp.StatusCode != 200 {
+			t.Fatalf("Expected HTTP 200 OK, got %v", resp.StatusCode)
+		}
 
 		respBody, _ := io.ReadAll(resp.Body)
 		var res validateVoucherResponse
-		_ = json.Unmarshal(respBody, &res)
+		if err := json.Unmarshal(respBody, &res); err != nil {
+			t.Fatalf("Failed to parse response JSON: %v", err)
+		}
 
+		if !res.Success {
+			t.Errorf("Expected success to be true, got false")
+		}
 		if res.Data.Valid {
 			t.Errorf("Expected MIN100K to be invalid due to min purchase requirement")
+		}
+		if res.Data.Message == "" {
+			t.Errorf("Expected data.message to describe why voucher is invalid, got empty string")
 		}
 	})
 
@@ -117,13 +187,24 @@ func TestVoucherSuite(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Request failed: %v", err)
 		}
+		if resp.StatusCode != 200 {
+			t.Fatalf("Expected HTTP 200 OK, got %v", resp.StatusCode)
+		}
 
 		respBody, _ := io.ReadAll(resp.Body)
 		var res validateVoucherResponse
-		_ = json.Unmarshal(respBody, &res)
+		if err := json.Unmarshal(respBody, &res); err != nil {
+			t.Fatalf("Failed to parse response JSON: %v", err)
+		}
 
+		if !res.Success {
+			t.Errorf("Expected success to be true, got false")
+		}
 		if res.Data.Valid {
 			t.Errorf("Expected SOLD_OUT to be invalid due to 0 quota")
+		}
+		if res.Data.Message != "Voucher quota has been reached" {
+			t.Errorf("Expected message 'Voucher quota has been reached', got '%s'", res.Data.Message)
 		}
 	})
 
@@ -133,13 +214,24 @@ func TestVoucherSuite(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Request failed: %v", err)
 		}
+		if resp.StatusCode != 200 {
+			t.Fatalf("Expected HTTP 200 OK, got %v", resp.StatusCode)
+		}
 
 		respBody, _ := io.ReadAll(resp.Body)
 		var res validateVoucherResponse
-		_ = json.Unmarshal(respBody, &res)
+		if err := json.Unmarshal(respBody, &res); err != nil {
+			t.Fatalf("Failed to parse response JSON: %v", err)
+		}
 
+		if !res.Success {
+			t.Errorf("Expected success to be true, got false")
+		}
 		if res.Data.Valid {
 			t.Errorf("Expected ONCE_ONLY to be invalid because user 100 already used it")
+		}
+		if res.Data.Message != "You have already used this voucher" {
+			t.Errorf("Expected message 'You have already used this voucher', got '%s'", res.Data.Message)
 		}
 	})
 
@@ -161,11 +253,59 @@ func TestVoucherSuite(t *testing.T) {
 			t.Fatalf("Expected HTTP 201 Created, got %v", resp.StatusCode)
 		}
 
-		// Verify record created in PostgreSQL DB
-		var count int
-		_ = dbConn.Get(&count, "SELECT count(*) FROM tm_vouchers WHERE code = 'NEWPROMO30'")
-		if count != 1 {
-			t.Errorf("Expected 1 voucher with code NEWPROMO30 in PostgreSQL DB, got %d", count)
+		respBody, _ := io.ReadAll(resp.Body)
+		var res createVoucherResponse
+		if err := json.Unmarshal(respBody, &res); err != nil {
+			t.Fatalf("Failed to parse response JSON: %v", err)
+		}
+
+		if !res.Success {
+			t.Errorf("Expected success to be true, got false")
+		}
+		if res.Message != "Voucher created successfully" {
+			t.Errorf("Expected message 'Voucher created successfully', got '%s'", res.Message)
+		}
+		if res.Data.ID <= 0 {
+			t.Errorf("Expected valid voucher ID in data, got %d", res.Data.ID)
+		}
+
+		// Verify record created in PostgreSQL DB across ALL inserted columns
+		var (
+			code          string
+			discountType  string
+			discountValue float64
+			maxDiscount   float64
+			minPurchase   float64
+			quota         int
+			isActive      bool
+		)
+		err = dbConn.QueryRow(`
+			SELECT code, discount_type, discount_value, max_discount, min_purchase, quota, is_active 
+			FROM tm_vouchers WHERE id = $1
+		`, res.Data.ID).Scan(&code, &discountType, &discountValue, &maxDiscount, &minPurchase, &quota, &isActive)
+		if err != nil {
+			t.Fatalf("Failed to fetch created voucher ID %d from DB: %v", res.Data.ID, err)
+		}
+		if code != "NEWPROMO30" {
+			t.Errorf("Expected code 'NEWPROMO30', got '%s'", code)
+		}
+		if discountType != "PERCENTAGE" {
+			t.Errorf("Expected discount_type 'PERCENTAGE', got '%s'", discountType)
+		}
+		if discountValue != 30.0 {
+			t.Errorf("Expected discount_value 30.0, got %f", discountValue)
+		}
+		if maxDiscount != 20000.0 {
+			t.Errorf("Expected max_discount 20000.0, got %f", maxDiscount)
+		}
+		if minPurchase != 50000.0 {
+			t.Errorf("Expected min_purchase 50000.0, got %f", minPurchase)
+		}
+		if quota != 20 {
+			t.Errorf("Expected quota 20, got %d", quota)
+		}
+		if !isActive {
+			t.Errorf("Expected is_active true, got false")
 		}
 	})
 
@@ -176,6 +316,47 @@ func TestVoucherSuite(t *testing.T) {
 		}
 		if resp.StatusCode != 200 {
 			t.Fatalf("Expected HTTP 200 OK, got %v", resp.StatusCode)
+		}
+
+		respBody, _ := io.ReadAll(resp.Body)
+		var res getListVouchersResponse
+		if err := json.Unmarshal(respBody, &res); err != nil {
+			t.Fatalf("Failed to parse response JSON: %v", err)
+		}
+
+		if !res.Success {
+			t.Errorf("Expected success to be true, got false")
+		}
+		if res.Message != "Success" {
+			t.Errorf("Expected message 'Success', got '%s'", res.Message)
+		}
+
+		// Assert pagination schema details
+		if res.Data.CurrentPage != 1 {
+			t.Errorf("Expected currentPage 1, got %d", res.Data.CurrentPage)
+		}
+		if res.Data.PageSize != 10 {
+			t.Errorf("Expected pageSize 10, got %d", res.Data.PageSize)
+		}
+		if res.Data.TotalData < 5 {
+			t.Errorf("Expected totalData at least 5, got %d", res.Data.TotalData)
+		}
+
+		// Assert array content details
+		if len(res.Data.Data) == 0 {
+			t.Fatalf("Expected voucher list in data.data to be non-empty")
+		}
+
+		// Assert first element schema & data correctness
+		firstVoucher := res.Data.Data[0]
+		if firstVoucher.ID <= 0 {
+			t.Errorf("Expected valid ID for first voucher, got %d", firstVoucher.ID)
+		}
+		if firstVoucher.Code == "" {
+			t.Errorf("Expected non-empty code for first voucher")
+		}
+		if firstVoucher.DiscountType != "PERCENTAGE" && firstVoucher.DiscountType != "FIXED" {
+			t.Errorf("Expected discountType to be PERCENTAGE or FIXED, got '%s'", firstVoucher.DiscountType)
 		}
 	})
 
@@ -188,6 +369,19 @@ func TestVoucherSuite(t *testing.T) {
 		}
 		if resp.StatusCode != 200 {
 			t.Fatalf("Expected HTTP 200 OK, got %v", resp.StatusCode)
+		}
+
+		respBody, _ := io.ReadAll(resp.Body)
+		var res genericResponse
+		if err := json.Unmarshal(respBody, &res); err != nil {
+			t.Fatalf("Failed to parse response JSON: %v", err)
+		}
+
+		if !res.Success {
+			t.Errorf("Expected success to be true, got false")
+		}
+		if res.Message != "Voucher status updated successfully" {
+			t.Errorf("Expected message 'Voucher status updated successfully', got '%s'", res.Message)
 		}
 
 		var isActive bool
@@ -205,6 +399,19 @@ func TestVoucherSuite(t *testing.T) {
 		}
 		if resp.StatusCode != 200 {
 			t.Fatalf("Expected HTTP 200 OK, got %v", resp.StatusCode)
+		}
+
+		respBody, _ := io.ReadAll(resp.Body)
+		var res genericResponse
+		if err := json.Unmarshal(respBody, &res); err != nil {
+			t.Fatalf("Failed to parse response JSON: %v", err)
+		}
+
+		if !res.Success {
+			t.Errorf("Expected success to be true, got false")
+		}
+		if res.Message != "Voucher deleted successfully" {
+			t.Errorf("Expected message 'Voucher deleted successfully', got '%s'", res.Message)
 		}
 
 		var deletedAt *string
