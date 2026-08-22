@@ -4,11 +4,11 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"eka-dev.cloud/transaction-service/utils/common"
 	"eka-dev.cloud/transaction-service/utils/response"
-	"github.com/gofiber/fiber/v2/log"
 	"github.com/jmoiron/sqlx"
 )
 
@@ -52,7 +52,7 @@ func (r *transactionRepository) InsertThTransaction(tx *sqlx.Tx, transaction Cre
 
 	err := tx.QueryRow(query, transaction.CreatedBy, transaction.TableId, transaction.OrderFor, transaction.Total, transaction.CreatedBy, voucherId, discountAmount).Scan(&id)
 	if err != nil {
-		log.Error("Failed to insert transaction:", err)
+		slog.Error("Failed to insert transaction", "error", err)
 		return 0, response.InternalServerError("Failed to insert transaction", nil)
 	}
 	return id, nil
@@ -63,7 +63,7 @@ func (r *transactionRepository) InsertTdTransaction(tx *sqlx.Tx, transactionId i
 
 	_, err := tx.Exec(query, transactionId, data.MenuID, data.Qty, data.Price, data.Total, data.Notes, createdBy)
 	if err != nil {
-		log.Error("Failed to insert transaction detail:", err)
+		slog.Error("Failed to insert transaction detail", "error", err)
 		return response.InternalServerError("Failed to insert transaction detail", nil)
 	}
 	return nil
@@ -85,13 +85,13 @@ func (r *transactionRepository) GetListTransactionsPagination(params common.Para
 	rows, err := r.db.NamedQuery(finalQuery, args)
 
 	if err != nil {
-		log.Error("Failed to get list transaction:", err)
+		slog.Error("Failed to get list transaction", "error", err)
 		return nil, response.InternalServerError("Failed to get list transaction", nil)
 	}
 	defer func(rows *sqlx.Rows) {
 		err := rows.Close()
 		if err != nil {
-			log.Error("failed to close rows:", err)
+			slog.Error("failed to close rows", "error", err)
 			return
 		}
 	}(rows)
@@ -99,7 +99,7 @@ func (r *transactionRepository) GetListTransactionsPagination(params common.Para
 	for rows.Next() {
 		var transaction TransactionResponse
 		if err := rows.StructScan(&transaction); err != nil {
-			log.Error("Failed to scan transaction:", err)
+			slog.Error("Failed to scan transaction", "error", err)
 			return nil, response.InternalServerError("Failed to scan transaction", nil)
 		}
 		record = append(record, transaction)
@@ -121,20 +121,20 @@ func (r *transactionRepository) GetListTransactionsPagination(params common.Para
 	countStmt, err := r.db.PrepareNamed(countFinalQuery)
 
 	if err != nil {
-		log.Error("Failed to prepare count query:", err)
+		slog.Error("Failed to prepare count query", "error", err)
 		return nil, response.InternalServerError("Failed to get list transaction count", nil)
 	}
 
 	defer func(countStmt *sqlx.NamedStmt) {
 		err := countStmt.Close()
 		if err != nil {
-			log.Error("failed to close count statement:", err)
+			slog.Error("failed to close count statement", "error", err)
 			return
 		}
 	}(countStmt)
 
 	if err := countStmt.Get(&totalData, countArgs); err != nil {
-		log.Error("Failed to get total data:", err)
+		slog.Error("Failed to get total data", "error", err)
 		return nil, response.InternalServerError("Failed to get list transaction count", nil)
 	}
 
@@ -168,13 +168,13 @@ func (r *transactionRepository) GetListTransactionsNoPagination(request common.P
 
 	rows, err := r.db.NamedQuery(finalQuery, args)
 	if err != nil {
-		log.Error("Failed to get list transaction:", err)
+		slog.Error("Failed to get list transaction", "error", err)
 		return nil, response.InternalServerError("Failed to get list transaction", nil)
 	}
 	defer func(rows *sqlx.Rows) {
 		err := rows.Close()
 		if err != nil {
-			log.Error("failed to close rows:", err)
+			slog.Error("failed to close rows", "error", err)
 			return
 		}
 	}(rows)
@@ -182,7 +182,7 @@ func (r *transactionRepository) GetListTransactionsNoPagination(request common.P
 	for rows.Next() {
 		var transaction TransactionResponse
 		if err := rows.StructScan(&transaction); err != nil {
-			log.Error("Failed to scan transaction:", err)
+			slog.Error("Failed to scan transaction", "error", err)
 			return nil, response.InternalServerError("Failed to scan transaction", nil)
 		}
 		record = append(record, transaction)
@@ -200,7 +200,7 @@ func (r *transactionRepository) GetOneTransaction(id int) (*TransactionResponse,
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, response.NotFound("Transaction not found", nil)
 		}
-		log.Error("Failed to get transaction by ID:", err)
+		slog.Error("Failed to get transaction by ID", "error", err)
 		return nil, response.InternalServerError("Failed to get transaction by ID", nil)
 	}
 
@@ -219,13 +219,13 @@ func (r *transactionRepository) GetListTransactionsByUserId(params common.Params
 	rows, err := r.db.NamedQuery(finalQuery, args)
 
 	if err != nil {
-		log.Error("Failed to get list transaction:", err)
+		slog.Error("Failed to get list transaction", "error", err)
 		return nil, response.InternalServerError("Failed to get list transaction", nil)
 	}
 	defer func(rows *sqlx.Rows) {
 		err := rows.Close()
 		if err != nil {
-			log.Error("failed to close rows:", err)
+			slog.Error("failed to close rows", "error", err)
 			return
 		}
 	}(rows)
@@ -233,7 +233,7 @@ func (r *transactionRepository) GetListTransactionsByUserId(params common.Params
 	for rows.Next() {
 		var transaction TransactionResponse
 		if err := rows.StructScan(&transaction); err != nil {
-			log.Error("Failed to scan transaction:", err)
+			slog.Error("Failed to scan transaction", "error", err)
 			return nil, response.InternalServerError("Failed to scan transaction", nil)
 		}
 		record = append(record, transaction)
@@ -247,20 +247,20 @@ func (r *transactionRepository) GetListTransactionsByUserId(params common.Params
 	countStmt, err := r.db.PrepareNamed(countFinalQuery)
 
 	if err != nil {
-		log.Error("Failed to prepare count query:", err)
+		slog.Error("Failed to prepare count query", "error", err)
 		return nil, response.InternalServerError("Failed to get list transaction count", nil)
 	}
 
 	defer func(countStmt *sqlx.NamedStmt) {
 		err := countStmt.Close()
 		if err != nil {
-			log.Error("failed to close count statement:", err)
+			slog.Error("failed to close count statement", "error", err)
 			return
 		}
 	}(countStmt)
 
 	if err := countStmt.Get(&totalData, countArgs); err != nil {
-		log.Error("Failed to get total data:", err)
+		slog.Error("Failed to get total data", "error", err)
 		return nil, response.InternalServerError("Failed to get list transaction count", nil)
 	}
 
@@ -286,7 +286,7 @@ func (r *transactionRepository) GetOneTransactionByUserId(id int, userId int64) 
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, response.NotFound("Transaction not found", nil)
 		}
-		log.Error("Failed to get transaction by ID:", err)
+		slog.Error("Failed to get transaction by ID", "error", err)
 		return nil, response.InternalServerError("Failed to get transaction by ID", nil)
 	}
 
@@ -299,7 +299,7 @@ func (r *transactionRepository) UpdateOrderStatus(tx *sqlx.Tx, id int, updatedBy
 	result, err := tx.Exec(query, updatedBy, id)
 
 	if err != nil {
-		log.Error("Failed to update order status:", err)
+		slog.Error("Failed to update order status", "error", err)
 		return response.InternalServerError("Failed to update order status", nil)
 	}
 
@@ -328,7 +328,7 @@ func (r *transactionRepository) SetRatingMenu(tx *sqlx.Tx, id int, rating int, u
 		if errors.Is(err, sql.ErrNoRows) {
 			return 0, response.BadRequest("No rows were updated, possibly due to invalid ID, rating already set, or order not completed", nil)
 		}
-		log.Error("Failed to set rating:", err)
+		slog.Error("Failed to set rating", "error", err)
 		return 0, response.InternalServerError("Failed to set rating", nil)
 	}
 
@@ -353,7 +353,7 @@ func (r *transactionRepository) SummaryReportTransactions(startDate string, endD
 
 	err := r.db.Select(&result.DailyData, queryDaily, startDate, endDate)
 	if err != nil {
-		log.Error("Failed to get daily summary report:", err)
+		slog.Error("Failed to get daily summary report", "error", err)
 		return nil, response.InternalServerError("Failed to get summary report", nil)
 	}
 
@@ -366,7 +366,7 @@ func (r *transactionRepository) SummaryReportTransactions(startDate string, endD
 
 	err = r.db.Select(&result.StatusBreakdown, queryStatus, startDate, endDate)
 	if err != nil {
-		log.Error("Failed to get status breakdown report:", err)
+		slog.Error("Failed to get status breakdown report", "error", err)
 	}
 
 	// 3. Peak Hours Breakdown
@@ -379,7 +379,7 @@ func (r *transactionRepository) SummaryReportTransactions(startDate string, endD
 
 	err = r.db.Select(&result.PeakHours, queryPeak, startDate, endDate)
 	if err != nil {
-		log.Error("Failed to get peak hours report:", err)
+		slog.Error("Failed to get peak hours report", "error", err)
 	}
 
 	// 4. Top 5 Menus
@@ -394,7 +394,7 @@ func (r *transactionRepository) SummaryReportTransactions(startDate string, endD
 
 	err = r.db.Select(&result.TopMenus, queryTopMenus, startDate, endDate)
 	if err != nil {
-		log.Error("Failed to get top menus report:", err)
+		slog.Error("Failed to get top menus report", "error", err)
 	}
 
 	return result, nil
@@ -435,7 +435,7 @@ func (r *transactionRepository) InsertTdTransactionBatch(tx *sqlx.Tx, transactio
 		_, err = r.db.Exec(query, valueArgs...)
 	}
 	if err != nil {
-		log.Error("Failed to bulk insert transaction details:", err)
+		slog.Error("Failed to bulk insert transaction details", "error", err)
 		return response.InternalServerError("Failed to bulk insert transaction details", nil)
 	}
 	return nil
@@ -453,7 +453,7 @@ func (r *transactionRepository) LogPromotionUsage(tx *sqlx.Tx, transactionId int
 		_, err = r.db.Exec(query, transactionId, promotionId, menuId, userId, qty, discountAmount)
 	}
 	if err != nil {
-		log.Error("Failed to log promotion usage:", err)
+		slog.Error("Failed to log promotion usage", "error", err)
 		return response.InternalServerError("Failed to log promotion usage", nil)
 	}
 	return nil
@@ -483,7 +483,7 @@ func (r *transactionRepository) LogPromotionUsageBatch(tx *sqlx.Tx, usages []Pro
 		_, err = r.db.Exec(query, valueArgs...)
 	}
 	if err != nil {
-		log.Error("Failed to bulk insert promotion usages:", err)
+		slog.Error("Failed to bulk insert promotion usages", "error", err)
 		return response.InternalServerError("Failed to bulk insert promotion usages", nil)
 	}
 	return nil

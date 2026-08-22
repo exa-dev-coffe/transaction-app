@@ -4,11 +4,11 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"eka-dev.cloud/transaction-service/utils/common"
 	"eka-dev.cloud/transaction-service/utils/response"
-	"github.com/gofiber/fiber/v2/log"
 	"github.com/jmoiron/sqlx"
 )
 
@@ -48,7 +48,7 @@ func (r *voucherRepository) GetVoucherByCode(tx *sqlx.Tx, code string) (*Voucher
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, response.NotFound("Voucher not found or expired", nil)
 		}
-		log.Error("Failed to get voucher:", err)
+		slog.Error("Failed to get voucher", "error", err)
 		return nil, response.InternalServerError("Failed to get voucher", nil)
 	}
 	return &voucher, nil
@@ -63,7 +63,7 @@ func (r *voucherRepository) InsertVoucherUsage(tx *sqlx.Tx, userId int64, vouche
 		_, err = r.db.Exec(query, userId, voucherId, checkoutId, discountAmount)
 	}
 	if err != nil {
-		log.Error("Failed to insert voucher usage:", err)
+		slog.Error("Failed to insert voucher usage", "error", err)
 		return response.InternalServerError("Failed to record voucher usage", nil)
 	}
 	return nil
@@ -79,7 +79,7 @@ func (r *voucherRepository) CheckUserVoucherUsage(tx *sqlx.Tx, userId int64, vou
 		err = r.db.Get(&count, query, userId, voucherId)
 	}
 	if err != nil {
-		log.Error("Failed to check user voucher usage:", err)
+		slog.Error("Failed to check user voucher usage", "error", err)
 		return 0, response.InternalServerError("Failed to verify voucher usage history", nil)
 	}
 	return count, nil
@@ -94,7 +94,7 @@ func (r *voucherRepository) DecrementVoucherQuota(tx *sqlx.Tx, voucherId int64) 
 		_, err = r.db.Exec(query, voucherId)
 	}
 	if err != nil {
-		log.Error("Failed to decrement voucher quota:", err)
+		slog.Error("Failed to decrement voucher quota", "error", err)
 		return response.InternalServerError("Failed to update voucher quota", nil)
 	}
 	return nil
@@ -109,7 +109,7 @@ func (r *voucherRepository) DeactivateVoucher(tx *sqlx.Tx, id int64) error {
 		_, err = r.db.Exec(query, id)
 	}
 	if err != nil {
-		log.Error("Failed to deactivate voucher:", err)
+		slog.Error("Failed to deactivate voucher", "error", err)
 		return response.InternalServerError("Failed to deactivate voucher", nil)
 	}
 	return nil
@@ -132,7 +132,7 @@ func (r *voucherRepository) InsertVoucher(tx *sqlx.Tx, request CreateVoucherRequ
 		if strings.Contains(err.Error(), "tm_vouchers_code_key") {
 			return 0, response.BadRequest("Voucher code already exists", nil)
 		}
-		log.Error("Failed to insert voucher:", err)
+		slog.Error("Failed to insert voucher", "error", err)
 		return 0, response.InternalServerError("Failed to create voucher", nil)
 	}
 	return id, nil
@@ -167,7 +167,7 @@ func (r *voucherRepository) ListVouchers(params common.ParamsListRequest, isPubl
 
 	rows, err := r.db.NamedQuery(finalQuery, args)
 	if err != nil {
-		log.Error("Failed to get list vouchers:", err)
+		slog.Error("Failed to get list vouchers", "error", err)
 		return nil, response.InternalServerError("Failed to get list vouchers", nil)
 	}
 	defer rows.Close()
@@ -175,7 +175,7 @@ func (r *voucherRepository) ListVouchers(params common.ParamsListRequest, isPubl
 	for rows.Next() {
 		var v Voucher
 		if err := rows.StructScan(&v); err != nil {
-			log.Error("Failed to scan voucher:", err)
+			slog.Error("Failed to scan voucher", "error", err)
 			return nil, response.InternalServerError("Failed to scan voucher", nil)
 		}
 		record = append(record, v)
@@ -186,14 +186,14 @@ func (r *voucherRepository) ListVouchers(params common.ParamsListRequest, isPubl
 	
 	rowsCount, err := r.db.NamedQuery(finalQueryCount, argsCount)
 	if err != nil {
-		log.Error("Failed to get count vouchers:", err)
+		slog.Error("Failed to get count vouchers", "error", err)
 		return nil, response.InternalServerError("Failed to get count vouchers", nil)
 	}
 	defer rowsCount.Close()
 
 	if rowsCount.Next() {
 		if err := rowsCount.Scan(&totalData); err != nil {
-			log.Error("Failed to scan count vouchers:", err)
+			slog.Error("Failed to scan count vouchers", "error", err)
 			return nil, response.InternalServerError("Failed to scan count vouchers", nil)
 		}
 	}
@@ -224,7 +224,7 @@ func (r *voucherRepository) DeleteVoucherByID(tx *sqlx.Tx, id int64) error {
 		info, err = r.db.Exec(query, id)
 	}
 	if err != nil {
-		log.Error("Failed to delete voucher:", err)
+		slog.Error("Failed to delete voucher", "error", err)
 		return response.InternalServerError("Failed to delete voucher", nil)
 	}
 	
@@ -252,7 +252,7 @@ func (r *voucherRepository) UpdateVoucherStatus(tx *sqlx.Tx, id int64, isActive 
 			if errors.Is(err, sql.ErrNoRows) {
 				return response.BadRequest("Voucher not found", nil)
 			}
-			log.Error("Failed to check voucher expiration:", err)
+			slog.Error("Failed to check voucher expiration", "error", err)
 			return response.InternalServerError("Failed to check voucher expiration", nil)
 		}
 		if expired {
@@ -291,7 +291,7 @@ func (r *voucherRepository) UpdateVoucherStatus(tx *sqlx.Tx, id int64, isActive 
 		info, err = r.db.Exec(query, args...)
 	}
 	if err != nil {
-		log.Error("Failed to update voucher status/visibility:", err)
+		slog.Error("Failed to update voucher status/visibility", "error", err)
 		return response.InternalServerError("Failed to update voucher status", nil)
 	}
 

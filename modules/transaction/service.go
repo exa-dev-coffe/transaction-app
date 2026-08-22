@@ -15,7 +15,6 @@ import (
 	"eka-dev.cloud/transaction-service/utils"
 	"eka-dev.cloud/transaction-service/utils/common"
 	"eka-dev.cloud/transaction-service/utils/response"
-	"github.com/gofiber/fiber/v2/log"
 	"github.com/jmoiron/sqlx"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
@@ -130,7 +129,7 @@ func (s *transactionService) CreateTransaction(tx *sqlx.Tx, request CreateTransa
 		// Fetch full transaction details (including menu names, table name, user name)
 		orderDetail, err := s.GetOneTransaction(&common.OneRequest{Id: id})
 		if err != nil {
-			log.Error("Failed to fetch full order details for SSE new order:", err)
+			slog.Error("Failed to fetch full order details for SSE new order", "error", err)
 			return
 		}
 
@@ -147,7 +146,7 @@ func (s *transactionService) CreateTransaction(tx *sqlx.Tx, request CreateTransa
 
 		ch, err := lib.GetChannel()
 		if err != nil {
-			log.Error("Failed to get rabbitmq channel for transaction notifications:", err)
+			slog.Error("Failed to get rabbitmq channel for transaction notifications", "error", err)
 			return
 		}
 		defer ch.Close()
@@ -163,14 +162,14 @@ func (s *transactionService) CreateTransaction(tx *sqlx.Tx, request CreateTransa
 		}
 		ssePayload, err := json.Marshal(payloadObj)
 		if err != nil {
-			log.Error("Failed to marshal SSE payload:", err)
+			slog.Error("Failed to marshal SSE payload", "error", err)
 		} else {
 			err = lib.SendMessage(ch, "", "", "order.created", lib.ExchangeFanout, amqp.Publishing{
 				ContentType: "application/json",
 				Body:        ssePayload,
 			}, string(ssePayload), false, false, true, amqp.Table{})
 			if err != nil {
-				log.Error("Failed to publish SSE new order message:", err)
+				slog.Error("Failed to publish SSE new order message", "error", err)
 			}
 		}
 
@@ -191,7 +190,7 @@ func (s *transactionService) CreateTransaction(tx *sqlx.Tx, request CreateTransa
 				Body:        emailPayload,
 			}, string(emailPayload), true, false, false, amqp.Table{})
 			if err != nil {
-				log.Error("Failed to publish Email order receipt message:", err)
+				slog.Error("Failed to publish Email order receipt message", "error", err)
 			}
 		}
 	}()
@@ -508,13 +507,13 @@ func (s *transactionService) UpdateOrderStatus(tx *sqlx.Tx, request UpdateOrderS
 
 		orderDetail, err := s.GetOneTransaction(&common.OneRequest{Id: request.Id})
 		if err != nil {
-			log.Error("Failed to fetch full order details for SSE update status:", err)
+			slog.Error("Failed to fetch full order details for SSE update status", "error", err)
 			return
 		}
 
 		ch, err := lib.GetChannel()
 		if err != nil {
-			log.Error("Failed to get rabbitmq channel for status update SSE:", err)
+			slog.Error("Failed to get rabbitmq channel for status update SSE", "error", err)
 			return
 		}
 		defer ch.Close()
@@ -529,7 +528,7 @@ func (s *transactionService) UpdateOrderStatus(tx *sqlx.Tx, request UpdateOrderS
 		}
 		ssePayload, err := json.Marshal(payloadObj)
 		if err != nil {
-			log.Error("Failed to marshal SSE payload:", err)
+			slog.Error("Failed to marshal SSE payload", "error", err)
 			return
 		}
 
@@ -539,7 +538,7 @@ func (s *transactionService) UpdateOrderStatus(tx *sqlx.Tx, request UpdateOrderS
 			Body:        ssePayload,
 		}, string(ssePayload), false, false, true, amqp.Table{})
 		if err != nil {
-			log.Error("Failed to publish SSE status update message:", err)
+			slog.Error("Failed to publish SSE status update message", "error", err)
 		}
 	}()
 
@@ -554,7 +553,7 @@ func (s *transactionService) SetRatingMenu(tx *sqlx.Tx, request SetRatingMenuReq
 
 	ch, err := lib.GetChannel()
 	if err != nil {
-		log.Error("Failed to get RabbitMQ channel:", err)
+		slog.Error("Failed to get RabbitMQ channel", "error", err)
 		return nil
 	}
 	payload := []byte(fmt.Sprintf(`{"id": %d, "rating": %d, "updatedBy": %d}`, idMenu, request.Rating, request.UpdatedBy))
@@ -563,7 +562,7 @@ func (s *transactionService) SetRatingMenu(tx *sqlx.Tx, request SetRatingMenuReq
 		Body:        payload,
 	}, string(payload), true, false, false, amqp.Table{})
 	if err != nil {
-		log.Error("Failed to send rating message to RabbitMQ:", err)
+		slog.Error("Failed to send rating message to RabbitMQ", "error", err)
 		return nil
 	}
 
@@ -673,7 +672,7 @@ func getAvailableMenuByIdsAndTableById(ids string, tableId int64) ([]MenuRespons
 	var menus InternalMenuResponse
 	err = json.Unmarshal(body, &menus)
 	if err != nil {
-		log.Error("Failed to unmarshal response body:", err)
+		slog.Error("Failed to unmarshal response body", "error", err)
 		return nil, response.InternalServerError("Internal Server Error", nil)
 	}
 
@@ -704,7 +703,7 @@ func getDataMenuByIdsAndTable(ids string, tableIds string) (GetMenusAndTableResp
 	var data InternalGetMenusAndTableResponse
 	err = json.Unmarshal(body, &data)
 	if err != nil {
-		log.Error("Failed to unmarshal response body:", err)
+		slog.Error("Failed to unmarshal response body", "error", err)
 		return GetMenusAndTableResponse{}, response.InternalServerError("Internal Server Error", nil)
 	}
 
@@ -734,7 +733,7 @@ func getUsersNameByIds(ids string) ([]UserResponse, error) {
 	var data InternalGetUserResponse
 	err = json.Unmarshal(body, &data)
 	if err != nil {
-		log.Error("Failed to unmarshal response body:", err)
+		slog.Error("Failed to unmarshal response body", "error", err)
 		return nil, response.InternalServerError("Internal Server Error", nil)
 	}
 

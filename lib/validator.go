@@ -3,27 +3,29 @@ package lib
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"mime/multipart"
+	"os"
 	"regexp"
 	"time"
 
 	"eka-dev.cloud/transaction-service/utils/common"
 	"eka-dev.cloud/transaction-service/utils/response"
 	"github.com/go-playground/validator/v10"
-	"github.com/gofiber/fiber/v2/log"
 )
 
 var Validate = validator.New()
 
 func init() {
-	log.Info("Initializing validator and registering custom validations")
+	slog.Info("Initializing validator and registering custom validations")
 	err := Validate.RegisterValidation("numeric", func(fl validator.FieldLevel) bool {
 		matched, _ := regexp.MatchString(`^[0-9]{6}$`, fl.Field().String())
 		return matched
 	})
 	Validate.RegisterStructValidation(ValidateDateOrder, common.DateOrder{})
 	if err != nil {
-		log.Fatal("Error registering numeric validation:", err)
+		slog.Error("Error registering numeric validation", "error", err)
+		os.Exit(1)
 	}
 }
 
@@ -39,19 +41,19 @@ func ValidateDateOrder(sl validator.StructLevel) {
 	startDate, err1 := time.Parse(layout, req.StartDate)
 	endDate, err2 := time.Parse(layout, req.EndDate)
 
-	// Jika format salah
+	// If format is invalid
 	if err1 != nil {
-		sl.ReportError(req.StartDate, "StartDate", "start_date", "invalid_date_format", "format harus YYYY-MM-DD")
+		sl.ReportError(req.StartDate, "StartDate", "start_date", "invalid_date_format", "format must be YYYY-MM-DD")
 		return
 	}
 	if err2 != nil {
-		sl.ReportError(req.EndDate, "EndDate", "end_date", "invalid_date_format", "format harus YYYY-MM-DD")
+		sl.ReportError(req.EndDate, "EndDate", "end_date", "invalid_date_format", "format must be YYYY-MM-DD")
 		return
 	}
 
-	// Jika endDate sebelum startDate
+	// If endDate is before startDate
 	if endDate.Before(startDate) {
-		sl.ReportError(req.EndDate, "EndDate", "end_date", "dateorder", "EndDate tidak boleh sebelum StartDate")
+		sl.ReportError(req.EndDate, "EndDate", "end_date", "dateorder", "EndDate cannot be before StartDate")
 	}
 }
 

@@ -3,12 +3,12 @@ package common
 import (
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 
 	"eka-dev.cloud/transaction-service/utils/response"
 	"github.com/gofiber/fiber/v2"
-	"github.com/gofiber/fiber/v2/log"
 	"github.com/jmoiron/sqlx"
 )
 
@@ -36,7 +36,7 @@ func BuildFilterQuery(baseQuery string, params ParamsListRequest, mappingFieldTy
 						case "int":
 							intValue, err := strconv.Atoi(params.Search.Value[i])
 							if err != nil {
-								log.Warnf("Invalid int value for field %s: %v", field, err)
+								slog.Warn("Invalid int value for field", "field", field, "error", err)
 								continue
 							}
 							baseQuery += fmt.Sprintf(" AND %s = :searchValue%d ", field, i)
@@ -44,7 +44,7 @@ func BuildFilterQuery(baseQuery string, params ParamsListRequest, mappingFieldTy
 						case "float":
 							floatValue, err := strconv.ParseFloat(params.Search.Value[i], 64)
 							if err != nil {
-								log.Warnf("Invalid float value for field %s: %v", field, err)
+								slog.Warn("Invalid float value for field", "field", field, "error", err)
 								continue
 							}
 							baseQuery += fmt.Sprintf(" AND %s = :searchValue%d ", field, i)
@@ -52,7 +52,7 @@ func BuildFilterQuery(baseQuery string, params ParamsListRequest, mappingFieldTy
 						case "bool":
 							boolValue, err := strconv.ParseBool(params.Search.Value[i])
 							if err != nil {
-								log.Warnf("Invalid bool value for field %s: %v", field, err)
+								slog.Warn("Invalid bool value for field", "field", field, "error", err)
 								continue
 							}
 							baseQuery += fmt.Sprintf(" AND %s = :searchValue%d ", field, i)
@@ -108,7 +108,7 @@ func BuildCountQuery(baseQuery string, params ParamsListRequest, mappingFieldTyp
 						case "int":
 							intValue, err := strconv.Atoi(params.Search.Value[i])
 							if err != nil {
-								log.Warnf("Invalid int value for field %s: %v", field, err)
+								slog.Warn("Invalid int value for field", "field", field, "error", err)
 								continue
 							}
 							baseQuery += fmt.Sprintf(" AND %s = :searchValue%d ", field, i)
@@ -116,7 +116,7 @@ func BuildCountQuery(baseQuery string, params ParamsListRequest, mappingFieldTyp
 						case "float":
 							floatValue, err := strconv.ParseFloat(params.Search.Value[i], 64)
 							if err != nil {
-								log.Warnf("Invalid float value for field %s: %v", field, err)
+								slog.Warn("Invalid float value for field", "field", field, "error", err)
 								continue
 							}
 							baseQuery += fmt.Sprintf(" AND %s = :searchValue%d ", field, i)
@@ -124,7 +124,7 @@ func BuildCountQuery(baseQuery string, params ParamsListRequest, mappingFieldTyp
 						case "bool":
 							boolValue, err := strconv.ParseBool(params.Search.Value[i])
 							if err != nil {
-								log.Warnf("Invalid bool value for field %s: %v", field, err)
+								slog.Warn("Invalid bool value for field", "field", field, "error", err)
 								continue
 							}
 							baseQuery += fmt.Sprintf(" AND %s = :searchValue%d ", field, i)
@@ -147,7 +147,7 @@ func BuildMappingField(params *ParamsListRequest, mappingField *map[string]strin
 		if mapped, ok := (*mappingField)[field]; ok {
 			params.Search.Field[i] = mapped
 		} else {
-			log.Warn("Field ", field, " not found in mappingField")
+			slog.Warn("Field not found in mappingField", "field", field)
 			params.Search.Field[i] = ""
 		}
 	}
@@ -255,7 +255,7 @@ func GetOneDataRequest(c *fiber.Ctx) (*OneRequest, error) {
 func GetInfoRowsAffected(result sql.Result) (int64, error) {
 	affected, err := result.RowsAffected()
 	if err != nil {
-		log.Error("Failed to get affected rows:", err)
+		slog.Error("Failed to get affected rows", "error", err)
 		return 0, response.InternalServerError("Failed to get affected rows", nil)
 	}
 	return affected, nil

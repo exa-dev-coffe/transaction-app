@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -11,7 +12,6 @@ import (
 	"eka-dev.cloud/transaction-service/lib"
 	"eka-dev.cloud/transaction-service/utils/common"
 	"eka-dev.cloud/transaction-service/utils/response"
-	"github.com/gofiber/fiber/v2/log"
 	"github.com/hibiken/asynq"
 	"github.com/jmoiron/sqlx"
 )
@@ -161,7 +161,7 @@ func (s *voucherService) CreateVoucher(tx *sqlx.Tx, request CreateVoucherRequest
 	// Schedule Asynq task for deactivation
 	expireTime, err := parseTime(request.ExpiredAt)
 	if err != nil {
-		log.Error("Failed to parse expired_at time for Asynq scheduling: ", err)
+		slog.Error("Failed to parse expired_at time for Asynq scheduling", "error", err)
 		return id, nil
 	}
 
@@ -170,7 +170,7 @@ func (s *voucherService) CreateVoucher(tx *sqlx.Tx, request CreateVoucherRequest
 		"body": fmt.Sprintf(`{"id": %d}`, id),
 	})
 	if err != nil {
-		log.Error("Failed to marshal Asynq task payload: ", err)
+		slog.Error("Failed to marshal Asynq task payload", "error", err)
 		return id, nil
 	}
 
@@ -178,9 +178,9 @@ func (s *voucherService) CreateVoucher(tx *sqlx.Tx, request CreateVoucherRequest
 		task := asynq.NewTask("task:http_post", payload)
 		_, err = lib.AsynqClient.Enqueue(task, asynq.ProcessAt(expireTime))
 		if err != nil {
-			log.Error("Failed to enqueue deactivation task in Asynq: ", err)
+			slog.Error("Failed to enqueue deactivation task in Asynq", "error", err)
 		} else {
-			log.Infof("Scheduled deactivation task for Voucher ID %d at %s", id, expireTime.Format(time.RFC3339))
+			slog.Info("Scheduled deactivation task for Voucher", "voucher_id", id, "time", expireTime.Format(time.RFC3339))
 		}
 	}
 

@@ -1,8 +1,9 @@
 package lib
 
 import (
+	"log/slog"
+
 	"eka-dev.cloud/transaction-service/config"
-	"github.com/gofiber/fiber/v2/log"
 	"github.com/hibiken/asynq"
 )
 
@@ -15,5 +16,5 @@ func InitAsynq() {
 		Password: config.Config.RedisPassword,
 	}
 	AsynqClient = asynq.NewClient(redisOpt)
-	log.Info("Asynq Client initialized successfully")
+	slog.Info("Asynq Client initialized successfully")
 }

@@ -1,6 +1,7 @@
 package voucher
 
 import (
+	"log/slog"
 	"strconv"
 
 	"eka-dev.cloud/transaction-service/lib"
@@ -8,7 +9,6 @@ import (
 	"eka-dev.cloud/transaction-service/utils/common"
 	"eka-dev.cloud/transaction-service/utils/response"
 	"github.com/gofiber/fiber/v2"
-	"github.com/gofiber/fiber/v2/log"
 )
 
 type Handler interface {
@@ -47,7 +47,7 @@ func NewHandler(app *fiber.App, service Service) Handler {
 func (h *handler) ValidateVoucher(c *fiber.Ctx) error {
 	var request ValidateVoucherRequest
 	if err := c.BodyParser(&request); err != nil {
-		log.Error("Failed to parse request body: ", err)
+		slog.Error("Failed to parse request body", "error", err)
 		return response.BadRequest("Invalid request body", nil)
 	}
 
@@ -74,7 +74,7 @@ func (h *handler) DeactivateVoucher(c *fiber.Ctx) error {
 		ID int64 `json:"id" validate:"required"`
 	}
 	if err := c.BodyParser(&request); err != nil {
-		log.Error("Failed to parse request body: ", err)
+		slog.Error("Failed to parse request body", "error", err)
 		return response.BadRequest("Invalid request body", nil)
 	}
 
@@ -94,7 +94,7 @@ func (h *handler) DeactivateVoucher(c *fiber.Ctx) error {
 func (h *handler) CreateVoucher(c *fiber.Ctx) error {
 	var request CreateVoucherRequest
 	if err := c.BodyParser(&request); err != nil {
-		log.Error("Failed to parse request body: ", err)
+		slog.Error("Failed to parse request body", "error", err)
 		return response.BadRequest("Invalid request body", nil)
 	}
 
@@ -151,7 +151,7 @@ func (h *handler) DeleteVoucher(c *fiber.Ctx) error {
 	idStr := c.Params("id")
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
-		log.Error("Failed to parse ID: ", err)
+		slog.Error("Failed to parse ID", "error", err)
 		return response.BadRequest("Invalid voucher ID", nil)
 	}
 
@@ -167,13 +167,13 @@ func (h *handler) UpdateVoucherStatus(c *fiber.Ctx) error {
 	idStr := c.Params("id")
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
-		log.Error("Failed to parse ID: ", err)
+		slog.Error("Failed to parse ID", "error", err)
 		return response.BadRequest("Invalid voucher ID", nil)
 	}
 
 	var request UpdateVoucherStatusRequest
 	if err := c.BodyParser(&request); err != nil {
-		log.Error("Failed to parse status body: ", err)
+		slog.Error("Failed to parse status body", "error", err)
 		return response.BadRequest("Invalid request body", nil)
 	}
 

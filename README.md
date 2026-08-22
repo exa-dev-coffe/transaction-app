@@ -53,4 +53,4 @@ Jalankan perintah berikut untuk mengeksekusi pengujian seluruh endpoint transaks
 go test -v .
 ```
 
-*Persyaratan:* Docker Desktop/Daemon harus aktif.
+*Requirement:* Docker Desktop/Daemon must be running.

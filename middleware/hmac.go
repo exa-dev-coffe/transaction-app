@@ -8,7 +8,6 @@ import (
 	"eka-dev.cloud/transaction-service/utils"
 	"eka-dev.cloud/transaction-service/utils/response"
 	"github.com/gofiber/fiber/v2"
-	"github.com/gofiber/fiber/v2/log"
 )
 
 func ValidateSignature(c *fiber.Ctx) error {
@@ -17,22 +16,22 @@ func ValidateSignature(c *fiber.Ctx) error {
 	timestamp := c.Get("X-Timestamp")
 
 	if signature == "" || timestamp == "" {
-		log.Error("Missing signature or timestamp")
+		slog.Error("Missing signature or timestamp")
 		return response.Unauthorized("Missing signature or timestamp", nil)
 	}
 
-	// Pastikan timestamp tidak lebih dari 5 menit untuk hindari replay attack
+	// Ensure timestamp is not older than 5 minutes to prevent replay attacks
 	reqTime, err := time.Parse(time.RFC3339, timestamp)
 	if err != nil || time.Since(reqTime) > 5*time.Minute {
-		log.Error("Invalid or expired timestamp:", err)
+		slog.Error("Invalid or expired timestamp", "error", err)
 		return response.Unauthorized("Invalid or expired timestamp", nil)
 	}
 
-	// Ambil data penting buat di-hash
+	// Get essential data to hash
 	body := string(c.Body())
 	query := c.Context().URI().QueryArgs().String()
 
-	// Buat message string-nya
+	// Construct the message string
 	message := fmt.Sprintf("%s%s%s", query, timestamp, body)
 
 	slog.Info("HMAC Validation Data",
@@ -40,7 +39,7 @@ func ValidateSignature(c *fiber.Ctx) error {
 		slog.String("body", body),
 	)
 
-	// Buat HMAC-nya
+	// Verify the HMAC
 	err = utils.VerifySignature(message, signature)
 	if err != nil {
 		return err

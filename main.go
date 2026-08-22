@@ -2,7 +2,8 @@ package main
 
 import (
 	"context"
-	"log"
+	"log/slog"
+	"os"
 
 	"eka-dev.cloud/transaction-service/config"
 	"eka-dev.cloud/transaction-service/db"
@@ -33,7 +34,7 @@ func main() {
 	defer func(db *sqlx.DB) {
 		err := db.Close()
 		if err != nil {
-			log.Println("Error closing database connection:", err)
+			slog.Error("Error closing database connection", "error", err)
 		}
 	}(db.DB)
 
@@ -55,12 +56,12 @@ func initiator() {
 	fiberApp.Get("/health", func(c *fiber.Ctx) error {
 		err := db.DB.Ping()
 		if err != nil {
-			log.Println("Database ping failed:", err)
+			slog.Error("Database ping failed", "error", err)
 			return c.Status(fiber.StatusInternalServerError).JSON(response.InternalServerError("Database connection error", nil))
 		}
 		err = lib.HealthCheck()
 		if err != nil {
-			log.Println("RabbitMQ connection failed:", err)
+			slog.Error("RabbitMQ connection failed", "error", err)
 			return c.Status(fiber.StatusInternalServerError).JSON(response.InternalServerError("RabbitMQ connection error", nil))
 		}
 		return c.Status(fiber.StatusOK).JSON(response.Success("OK", nil))
@@ -87,7 +88,7 @@ func initiator() {
 
 	err := fiberApp.Listen(config.Config.Port)
 	if err != nil {
-		log.Fatalln("Failed to start server:", err)
-		return
+		slog.Error("Failed to start server", "error", err)
+		os.Exit(1)
 	}
 }

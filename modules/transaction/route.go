@@ -1,12 +1,13 @@
 package transaction
 
 import (
+	"log/slog"
+
 	"eka-dev.cloud/transaction-service/lib"
 	"eka-dev.cloud/transaction-service/middleware"
 	"eka-dev.cloud/transaction-service/utils/common"
 	"eka-dev.cloud/transaction-service/utils/response"
 	"github.com/gofiber/fiber/v2"
-	"github.com/gofiber/fiber/v2/log"
 	"github.com/jmoiron/sqlx"
 )
 
@@ -47,7 +48,7 @@ func (h *handler) CreateTransaction(c *fiber.Ctx) error {
 	// Parse request body
 	var request CreateTransactionRequest
 	if err := c.BodyParser(&request); err != nil {
-		log.Error("Failed to parse request body:", err)
+		slog.Error("Failed to parse request body", "error", err)
 		return response.BadRequest("Invalid request body", nil)
 	}
 
@@ -87,7 +88,7 @@ func (h *handler) GetListTransactions(c *fiber.Ctx) error {
 		dateRequest := common.DateOrder{}
 		err := c.QueryParser(&dateRequest)
 		if err != nil {
-			log.Error("Failed to parse request query:", err)
+			slog.Error("Failed to parse request query", "error", err)
 			return response.BadRequest("Invalid request query", nil)
 		}
 
@@ -186,7 +187,7 @@ func (h *handler) UpdateOrderStatus(c *fiber.Ctx) error {
 	// Parse request body
 	var request UpdateOrderStatusRequest
 	if err := c.BodyParser(&request); err != nil {
-		log.Error("Failed to parse request body:", err)
+		slog.Error("Failed to parse request body", "error", err)
 		return response.BadRequest("Invalid request body", nil)
 	}
 
@@ -215,7 +216,7 @@ func (h *handler) SetRatingMenu(c *fiber.Ctx) error {
 	// Parse request body
 	var request SetRatingMenuRequest
 	if err := c.BodyParser(&request); err != nil {
-		log.Error("Failed to parse request body:", err)
+		slog.Error("Failed to parse request body", "error", err)
 		return response.BadRequest("Invalid request body", nil)
 	}
 
@@ -247,7 +248,7 @@ func (h *handler) SummaryReportTransactions(c *fiber.Ctx) error {
 
 	err := c.QueryParser(&request)
 	if err != nil {
-		log.Error("Failed to parse request query:", err)
+		slog.Error("Failed to parse request query", "error", err)
 		return response.BadRequest("Invalid request query", nil)
 	}
 

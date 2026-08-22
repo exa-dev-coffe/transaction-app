@@ -1,7 +1,7 @@
 package config
 
 import (
-	"log"
+	"log/slog"
 	"time"
 
 	"github.com/spf13/viper"
@@ -39,12 +39,12 @@ var Config appConfig
 
 func init() {
 	// Load env
-	log.Println("Loading .env file")
+	slog.Info("Loading .env file")
 	viper.SetConfigFile(".env") // atau bisa juga pakai viper.SetConfigName("app") + viper.AddConfigPath(".")
 	viper.AutomaticEnv()        // override dengan ENV OS kalau ada
 
 	if err := viper.ReadInConfig(); err != nil {
-		log.Println("No .env file found, fallback to system environment")
+		slog.Warn("No .env file found, fallback to system environment")
 	}
 
 	Config = appConfig{
