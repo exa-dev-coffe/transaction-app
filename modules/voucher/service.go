@@ -22,9 +22,9 @@ type Service interface {
 	LogVoucherUsage(tx *sqlx.Tx, userId int64, voucherId int64, checkoutId int64, discountAmount float64) error
 	DeactivateVoucher(tx *sqlx.Tx, id int64) error
 	CreateVoucher(tx *sqlx.Tx, request CreateVoucherRequest) (int64, error)
-	GetListVouchers(params common.ParamsListRequest) (*response.Pagination[[]Voucher], error)
+	GetListVouchers(params common.ParamsListRequest, isPublicOnly bool, userId int64) (*response.Pagination[[]Voucher], error)
 	DeleteVoucher(tx *sqlx.Tx, id int64) error
-	UpdateVoucherStatus(tx *sqlx.Tx, id int64, isActive bool) error
+	UpdateVoucherStatus(tx *sqlx.Tx, id int64, isActive *bool, isPublic *bool) error
 }
 
 type voucherService struct {
@@ -90,6 +90,10 @@ func (s *voucherService) ValidateVoucher(request ValidateVoucherRequest, userId 
 		DiscountAmount: discountAmount,
 		FinalTotal:     request.OrderTotal - discountAmount,
 		Message:        "Voucher applied successfully",
+		DiscountType:   voucher.DiscountType,
+		DiscountValue:  voucher.DiscountValue,
+		MaxDiscount:    voucher.MaxDiscount,
+		MinPurchase:    voucher.MinPurchase,
 	}, nil
 }
 
@@ -145,6 +149,10 @@ func (s *voucherService) DeactivateVoucher(tx *sqlx.Tx, id int64) error {
 }
 
 func (s *voucherService) CreateVoucher(tx *sqlx.Tx, request CreateVoucherRequest) (int64, error) {
+	if request.DiscountType == "PERCENTAGE" && request.DiscountValue > 100 {
+		return 0, response.BadRequest("Percentage discount value cannot exceed 100%", nil)
+	}
+
 	id, err := s.repo.InsertVoucher(tx, request)
 	if err != nil {
 		return 0, err
@@ -179,16 +187,16 @@ func (s *voucherService) CreateVoucher(tx *sqlx.Tx, request CreateVoucherRequest
 	return id, nil
 }
 
-func (s *voucherService) GetListVouchers(params common.ParamsListRequest) (*response.Pagination[[]Voucher], error) {
-	return s.repo.ListVouchers(params)
+func (s *voucherService) GetListVouchers(params common.ParamsListRequest, isPublicOnly bool, userId int64) (*response.Pagination[[]Voucher], error) {
+	return s.repo.ListVouchers(params, isPublicOnly, userId)
 }
 
 func (s *voucherService) DeleteVoucher(tx *sqlx.Tx, id int64) error {
 	return s.repo.DeleteVoucherByID(tx, id)
 }
 
-func (s *voucherService) UpdateVoucherStatus(tx *sqlx.Tx, id int64, isActive bool) error {
-	return s.repo.UpdateVoucherStatus(tx, id, isActive)
+func (s *voucherService) UpdateVoucherStatus(tx *sqlx.Tx, id int64, isActive *bool, isPublic *bool) error {
+	return s.repo.UpdateVoucherStatus(tx, id, isActive, isPublic)
 }
 
 func parseTime(tStr string) (time.Time, error) {

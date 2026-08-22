@@ -93,11 +93,33 @@ func (s *transactionService) CreateTransaction(tx *sqlx.Tx, request CreateTransa
 		}
 	}
 
-	for i := range request.Datas {
-		err = s.repo.InsertTdTransaction(tx, id, request.CreatedBy, request.Datas[i])
-		if err != nil {
-			return err
+	// Bulk Batch Write for Transaction Details
+	err = s.repo.InsertTdTransactionBatch(tx, id, request.CreatedBy, request.Datas)
+	if err != nil {
+		return err
+	}
+
+	// Prepare Bulk Batch Write for Promotion Usage Logs
+	promoLogs := make([]PromotionUsageLog, 0)
+	for _, m := range menus {
+		if m.Discount != nil && m.Discount.Savings > 0 {
+			for _, data := range request.Datas {
+				if m.Id == data.MenuID {
+					promoLogs = append(promoLogs, PromotionUsageLog{
+						TransactionID:  int64(id),
+						PromotionID:    m.Discount.PromotionID,
+						MenuID:         int64(m.Id),
+						UserID:         request.CreatedBy,
+						Qty:            data.Qty,
+						DiscountAmount: m.Discount.Savings * float64(data.Qty),
+					})
+				}
+			}
 		}
+	}
+
+	if len(promoLogs) > 0 {
+		_ = s.repo.LogPromotionUsageBatch(tx, promoLogs)
 	}
 
 	// Trigger notifications asynchronously after successful creation
@@ -555,11 +577,15 @@ func (s *transactionService) SummaryReportTransactions(startDate string, endDate
 func calculateTotalPriceMenu(menus []MenuResponse, request *CreateTransactionRequest) float64 {
 	var total float64
 	for _, menu := range menus {
+		itemPrice := menu.Price
+		if menu.EffectivePrice > 0 {
+			itemPrice = menu.EffectivePrice
+		}
 		for iD, data := range request.Datas {
 			if menu.Id == data.MenuID {
-				request.Datas[iD].Price = menu.Price
-				request.Datas[iD].Total = menu.Price * float64(data.Qty)
-				total += menu.Price * float64(data.Qty)
+				request.Datas[iD].Price = itemPrice
+				request.Datas[iD].Total = itemPrice * float64(data.Qty)
+				total += itemPrice * float64(data.Qty)
 			}
 		}
 	}

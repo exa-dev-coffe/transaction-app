@@ -65,13 +65,15 @@ func TestVoucherSuite(t *testing.T) {
 
 	// Seed Real Vouchers into PostgreSQL Test Database
 	_, err := dbConn.Exec(`
-		INSERT INTO tm_vouchers (id, code, discount_type, discount_value, max_discount, min_purchase, quota, is_active, expired_at)
+		INSERT INTO tm_vouchers (id, code, discount_type, discount_value, max_discount, min_purchase, quota, is_active, is_public, expired_at)
 		VALUES 
-			(10, 'DISCOUNT10', 'PERCENTAGE', 10.00, 15000.00, 50000.00, 10, true, NOW() + INTERVAL '1 day'),
-			(11, 'HEMAT20K', 'FIXED', 20000.00, 0.00, 50000.00, 5, true, NOW() + INTERVAL '1 day'),
-			(12, 'MIN100K', 'FIXED', 10000.00, 0.00, 100000.00, 5, true, NOW() + INTERVAL '1 day'),
-			(13, 'SOLD_OUT', 'FIXED', 10000.00, 0.00, 10000.00, 0, true, NOW() + INTERVAL '1 day'),
-			(14, 'ONCE_ONLY', 'FIXED', 10000.00, 0.00, 10000.00, 10, true, NOW() + INTERVAL '1 day')
+			(10, 'DISCOUNT10', 'PERCENTAGE', 10.00, 15000.00, 50000.00, 10, true, true, NOW() + INTERVAL '1 day'),
+			(11, 'HEMAT20K', 'FIXED', 20000.00, 0.00, 50000.00, 5, true, true, NOW() + INTERVAL '1 day'),
+			(12, 'MIN100K', 'FIXED', 10000.00, 0.00, 100000.00, 5, true, true, NOW() + INTERVAL '1 day'),
+			(13, 'SOLD_OUT', 'FIXED', 10000.00, 0.00, 10000.00, 0, true, true, NOW() + INTERVAL '1 day'),
+			(14, 'ONCE_ONLY', 'FIXED', 10000.00, 0.00, 10000.00, 10, true, true, NOW() + INTERVAL '1 day'),
+			(15, 'EXPIRED_VOUCHER', 'FIXED', 10000.00, 0.00, 10000.00, 10, false, true, NOW() - INTERVAL '1 day'),
+			(99, 'SECRET_VIP_CODE', 'FIXED', 50000.00, 0.00, 100000.00, 10, true, false, NOW() + INTERVAL '1 day')
 		ON CONFLICT (id) DO NOTHING;
 
 		INSERT INTO tr_voucher_usages (user_id, voucher_id, checkout_id, discount_amount)
@@ -360,6 +362,35 @@ func TestVoucherSuite(t *testing.T) {
 		}
 	})
 
+	t.Run("GET /vouchers - Customer & Barista Cannot See Private Secret Vouchers", func(t *testing.T) {
+		resp, err := ExecuteTestRequest(app, "GET", "/api/1.0/vouchers?page=1&size=100", nil, customerToken)
+		if err != nil {
+			t.Fatalf("Request failed: %v", err)
+		}
+		if resp.StatusCode != 200 {
+			respBody, _ := io.ReadAll(resp.Body)
+			t.Fatalf("Expected HTTP 200 OK for customer listing vouchers, got %v: %s", resp.StatusCode, string(respBody))
+		}
+
+		respBody, _ := io.ReadAll(resp.Body)
+		var res getListVouchersResponse
+		if err := json.Unmarshal(respBody, &res); err != nil {
+			t.Fatalf("Failed to parse response JSON: %v", err)
+		}
+
+		// Security & Privacy assertion:
+		// 1. SECRET_VIP_CODE (is_public = false) must NOT be returned to non-admin customers!
+		// 2. ONCE_ONLY (voucher ID 14, already used by user 100) must NOT be returned!
+		for _, v := range res.Data.Data {
+			if v.Code == "SECRET_VIP_CODE" {
+				t.Fatalf("SECURITY VIOLATION: Non-admin customer was able to view private secret voucher 'SECRET_VIP_CODE'")
+			}
+			if v.Code == "ONCE_ONLY" {
+				t.Fatalf("PRIVACY VIOLATION: Non-admin customer was able to view already redeemed voucher 'ONCE_ONLY'")
+			}
+		}
+	})
+
 	t.Run("PATCH /vouchers/:id/status - Admin Update Voucher Status", func(t *testing.T) {
 		body := []byte(`{"isActive": false}`)
 		url := fmt.Sprintf("/api/1.0/vouchers/10/status")
@@ -388,6 +419,43 @@ func TestVoucherSuite(t *testing.T) {
 		_ = dbConn.Get(&isActive, "SELECT is_active FROM tm_vouchers WHERE id = 10")
 		if isActive != false {
 			t.Errorf("Expected voucher 10 is_active to be false in PostgreSQL DB")
+		}
+	})
+
+	t.Run("PATCH /vouchers/:id/status - Admin Update Voucher IsPublic Visibility", func(t *testing.T) {
+		body := []byte(`{"isPublic": false}`)
+		url := fmt.Sprintf("/api/1.0/vouchers/10/status")
+		resp, err := ExecuteTestRequest(app, "PATCH", url, body, adminToken)
+		if err != nil {
+			t.Fatalf("Request failed: %v", err)
+		}
+		if resp.StatusCode != 200 {
+			t.Fatalf("Expected HTTP 200 OK, got %v", resp.StatusCode)
+		}
+
+		var isPublic bool
+		_ = dbConn.Get(&isPublic, "SELECT is_public FROM tm_vouchers WHERE id = 10")
+		if isPublic != false {
+			t.Errorf("Expected voucher 10 is_public to be false in PostgreSQL DB")
+		}
+	})
+
+	t.Run("PATCH /vouchers/:id/status - Cannot Activate Expired Voucher", func(t *testing.T) {
+		body := []byte(`{"isActive": true}`)
+		url := fmt.Sprintf("/api/1.0/vouchers/15/status")
+		resp, err := ExecuteTestRequest(app, "PATCH", url, body, adminToken)
+		if err != nil {
+			t.Fatalf("Request failed: %v", err)
+		}
+		if resp.StatusCode != 400 {
+			t.Fatalf("Expected HTTP 400 Bad Request, got %v", resp.StatusCode)
+		}
+
+		respBody, _ := io.ReadAll(resp.Body)
+		var res genericResponse
+		_ = json.Unmarshal(respBody, &res)
+		if res.Message != "Cannot activate an expired voucher" {
+			t.Errorf("Expected message 'Cannot activate an expired voucher', got '%s'", res.Message)
 		}
 	})
 

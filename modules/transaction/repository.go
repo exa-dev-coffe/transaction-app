@@ -3,6 +3,8 @@ package transaction
 import (
 	"database/sql"
 	"errors"
+	"fmt"
+	"strings"
 
 	"eka-dev.cloud/transaction-service/utils/common"
 	"eka-dev.cloud/transaction-service/utils/response"
@@ -10,10 +12,20 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
+type PromotionUsageLog struct {
+	TransactionID  int64
+	PromotionID    int64
+	MenuID         int64
+	UserID         int64
+	Qty            int
+	DiscountAmount float64
+}
+
 type Repository interface {
 	// TODO: define repository methods
 	InsertThTransaction(tx *sqlx.Tx, transaction CreateTransactionRequest, voucherId *int64, discountAmount float64) (int, error)
 	InsertTdTransaction(tx *sqlx.Tx, transactionId int, createdBy int64, data Data) error
+	InsertTdTransactionBatch(tx *sqlx.Tx, transactionId int, createdBy int64, datas []Data) error
 	GetListTransactionsPagination(params common.ParamsListRequest, startDate string, endDate string) (*response.Pagination[[]TransactionResponse], error)
 	GetListTransactionsNoPagination(request common.ParamsListRequest, startDate string, endDate string) ([]TransactionResponse, error)
 	GetOneTransaction(id int) (*TransactionResponse, error)
@@ -22,6 +34,8 @@ type Repository interface {
 	UpdateOrderStatus(tx *sqlx.Tx, id int, updatedBy int64) error
 	SetRatingMenu(tx *sqlx.Tx, id int, rating int, updatedBy int64) (int, error)
 	SummaryReportTransactions(startDate string, endDate string) (*SummaryReportData, error)
+	LogPromotionUsage(tx *sqlx.Tx, transactionId int64, promotionId int64, menuId int64, userId int64, qty int, discountAmount float64) error
+	LogPromotionUsageBatch(tx *sqlx.Tx, usages []PromotionUsageLog) error
 }
 
 type transactionRepository struct {
@@ -393,6 +407,84 @@ func validateAffectedRows(info sql.Result, message string) error {
 	}
 	if affected == 0 {
 		return response.BadRequest(message, nil)
+	}
+	return nil
+}
+
+func (r *transactionRepository) InsertTdTransactionBatch(tx *sqlx.Tx, transactionId int, createdBy int64, datas []Data) error {
+	if len(datas) == 0 {
+		return nil
+	}
+
+	valueStrings := make([]string, 0, len(datas))
+	valueArgs := make([]interface{}, 0, len(datas)*7)
+
+	for i, data := range datas {
+		offset := i * 7
+		valueStrings = append(valueStrings, fmt.Sprintf("($%d, $%d, $%d, $%d, $%d, $%d, $%d)",
+			offset+1, offset+2, offset+3, offset+4, offset+5, offset+6, offset+7))
+		valueArgs = append(valueArgs, transactionId, data.MenuID, data.Qty, data.Price, data.Total, data.Notes, createdBy)
+	}
+
+	query := fmt.Sprintf("INSERT INTO td_user_checkouts (ref_id, menu_id, qty, price, total_price, notes, created_by) VALUES %s", strings.Join(valueStrings, ", "))
+
+	var err error
+	if tx != nil {
+		_, err = tx.Exec(query, valueArgs...)
+	} else {
+		_, err = r.db.Exec(query, valueArgs...)
+	}
+	if err != nil {
+		log.Error("Failed to bulk insert transaction details:", err)
+		return response.InternalServerError("Failed to bulk insert transaction details", nil)
+	}
+	return nil
+}
+
+func (r *transactionRepository) LogPromotionUsage(tx *sqlx.Tx, transactionId int64, promotionId int64, menuId int64, userId int64, qty int, discountAmount float64) error {
+	query := `
+		INSERT INTO tr_promotion_usages (transaction_id, promotion_id, menu_id, user_id, qty, discount_amount)
+		VALUES ($1, $2, $3, $4, $5, $6)
+	`
+	var err error
+	if tx != nil {
+		_, err = tx.Exec(query, transactionId, promotionId, menuId, userId, qty, discountAmount)
+	} else {
+		_, err = r.db.Exec(query, transactionId, promotionId, menuId, userId, qty, discountAmount)
+	}
+	if err != nil {
+		log.Error("Failed to log promotion usage:", err)
+		return response.InternalServerError("Failed to log promotion usage", nil)
+	}
+	return nil
+}
+
+func (r *transactionRepository) LogPromotionUsageBatch(tx *sqlx.Tx, usages []PromotionUsageLog) error {
+	if len(usages) == 0 {
+		return nil
+	}
+
+	valueStrings := make([]string, 0, len(usages))
+	valueArgs := make([]interface{}, 0, len(usages)*6)
+
+	for i, u := range usages {
+		offset := i * 6
+		valueStrings = append(valueStrings, fmt.Sprintf("($%d, $%d, $%d, $%d, $%d, $%d)",
+			offset+1, offset+2, offset+3, offset+4, offset+5, offset+6))
+		valueArgs = append(valueArgs, u.TransactionID, u.PromotionID, u.MenuID, u.UserID, u.Qty, u.DiscountAmount)
+	}
+
+	query := fmt.Sprintf("INSERT INTO tr_promotion_usages (transaction_id, promotion_id, menu_id, user_id, qty, discount_amount) VALUES %s", strings.Join(valueStrings, ", "))
+
+	var err error
+	if tx != nil {
+		_, err = tx.Exec(query, valueArgs...)
+	} else {
+		_, err = r.db.Exec(query, valueArgs...)
+	}
+	if err != nil {
+		log.Error("Failed to bulk insert promotion usages:", err)
+		return response.InternalServerError("Failed to bulk insert promotion usages", nil)
 	}
 	return nil
 }

@@ -3,6 +3,7 @@ package voucher
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"strings"
 
 	"eka-dev.cloud/transaction-service/utils/common"
@@ -19,9 +20,9 @@ type Repository interface {
 	DeactivateVoucher(tx *sqlx.Tx, id int64) error
 
 	InsertVoucher(tx *sqlx.Tx, request CreateVoucherRequest) (int64, error)
-	ListVouchers(params common.ParamsListRequest) (*response.Pagination[[]Voucher], error)
+	ListVouchers(params common.ParamsListRequest, isPublicOnly bool, userId int64) (*response.Pagination[[]Voucher], error)
 	DeleteVoucherByID(tx *sqlx.Tx, id int64) error
-	UpdateVoucherStatus(tx *sqlx.Tx, id int64, isActive bool) error
+	UpdateVoucherStatus(tx *sqlx.Tx, id int64, isActive *bool, isPublic *bool) error
 }
 
 type voucherRepository struct {
@@ -34,7 +35,7 @@ func NewVoucherRepository(db *sqlx.DB) Repository {
 
 func (r *voucherRepository) GetVoucherByCode(tx *sqlx.Tx, code string) (*Voucher, error) {
 	var voucher Voucher
-	query := `SELECT id, code, discount_type, discount_value, max_discount, min_purchase, quota, is_active, expired_at, created_at, created_by, updated_at, updated_by, deleted_at FROM tm_vouchers WHERE code = $1 AND is_active = TRUE AND expired_at > NOW() AND deleted_at IS NULL`
+	query := `SELECT id, code, discount_type, discount_value, max_discount, min_purchase, quota, is_active, is_public, expired_at, created_at, created_by, updated_at, updated_by, deleted_at FROM tm_vouchers WHERE code = $1 AND is_active = TRUE AND expired_at > NOW() AND deleted_at IS NULL`
 	
 	var err error
 	if tx != nil {
@@ -115,13 +116,17 @@ func (r *voucherRepository) DeactivateVoucher(tx *sqlx.Tx, id int64) error {
 }
 
 func (r *voucherRepository) InsertVoucher(tx *sqlx.Tx, request CreateVoucherRequest) (int64, error) {
-	query := `INSERT INTO tm_vouchers (code, discount_type, discount_value, max_discount, min_purchase, quota, expired_at, created_by) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`
+	isPublic := true
+	if request.IsPublic != nil {
+		isPublic = *request.IsPublic
+	}
+	query := `INSERT INTO tm_vouchers (code, discount_type, discount_value, max_discount, min_purchase, quota, is_public, expired_at, created_by) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`
 	var id int64
 	var err error
 	if tx != nil {
-		err = tx.QueryRow(query, request.Code, request.DiscountType, request.DiscountValue, request.MaxDiscount, request.MinPurchase, request.Quota, request.ExpiredAt, request.CreatedBy).Scan(&id)
+		err = tx.QueryRow(query, request.Code, request.DiscountType, request.DiscountValue, request.MaxDiscount, request.MinPurchase, request.Quota, isPublic, request.ExpiredAt, request.CreatedBy).Scan(&id)
 	} else {
-		err = r.db.QueryRow(query, request.Code, request.DiscountType, request.DiscountValue, request.MaxDiscount, request.MinPurchase, request.Quota, request.ExpiredAt, request.CreatedBy).Scan(&id)
+		err = r.db.QueryRow(query, request.Code, request.DiscountType, request.DiscountValue, request.MaxDiscount, request.MinPurchase, request.Quota, isPublic, request.ExpiredAt, request.CreatedBy).Scan(&id)
 	}
 	if err != nil {
 		if strings.Contains(err.Error(), "tm_vouchers_code_key") {
@@ -133,17 +138,29 @@ func (r *voucherRepository) InsertVoucher(tx *sqlx.Tx, request CreateVoucherRequ
 	return id, nil
 }
 
-func (r *voucherRepository) ListVouchers(params common.ParamsListRequest) (*response.Pagination[[]Voucher], error) {
+func (r *voucherRepository) ListVouchers(params common.ParamsListRequest, isPublicOnly bool, userId int64) (*response.Pagination[[]Voucher], error) {
 	var record = make([]Voucher, 0)
-	query := `SELECT id, code, discount_type, discount_value, max_discount, min_purchase, quota, is_active, expired_at, created_at, created_by, updated_at, updated_by, deleted_at FROM tm_vouchers WHERE deleted_at IS NULL`
-	
+	query := `SELECT id, code, discount_type, discount_value, max_discount, min_purchase, quota, is_active, is_public, expired_at, created_at, created_by, updated_at, updated_by, deleted_at FROM tm_vouchers WHERE deleted_at IS NULL`
+	queryCount := "SELECT COUNT(id) FROM tm_vouchers WHERE deleted_at IS NULL"
+
+	if isPublicOnly {
+		query += " AND is_public = TRUE AND is_active = TRUE AND expired_at > NOW() AND quota != 0"
+		queryCount += " AND is_public = TRUE AND is_active = TRUE AND expired_at > NOW() AND quota != 0"
+		if userId > 0 {
+			query += fmt.Sprintf(" AND id NOT IN (SELECT voucher_id FROM tr_voucher_usages WHERE user_id = %d)", userId)
+			queryCount += fmt.Sprintf(" AND id NOT IN (SELECT voucher_id FROM tr_voucher_usages WHERE user_id = %d)", userId)
+		}
+	}
+
 	var voucherMappingFields = map[string]string{
-		"id":   "id",
-		"code": "code",
+		"id":       "id",
+		"code":     "code",
+		"isPublic": "is_public",
 	}
 	var voucherMappingFiedType = map[string]string{
-		"id":   "int",
-		"code": "string",
+		"id":       "int",
+		"code":     "string",
+		"isPublic": "bool",
 	}
 	common.BuildMappingField(&params, &voucherMappingFields)
 	finalQuery, args := common.BuildFilterQuery(query, params, &voucherMappingFiedType, "")
@@ -165,7 +182,6 @@ func (r *voucherRepository) ListVouchers(params common.ParamsListRequest) (*resp
 	}
 
 	var totalData int
-	queryCount := "SELECT COUNT(id) FROM tm_vouchers WHERE deleted_at IS NULL"
 	finalQueryCount, argsCount := common.BuildCountQuery(queryCount, params, &voucherMappingFiedType)
 	
 	rowsCount, err := r.db.NamedQuery(finalQueryCount, argsCount)
@@ -222,8 +238,8 @@ func (r *voucherRepository) DeleteVoucherByID(tx *sqlx.Tx, id int64) error {
 	return nil
 }
 
-func (r *voucherRepository) UpdateVoucherStatus(tx *sqlx.Tx, id int64, isActive bool) error {
-	if isActive {
+func (r *voucherRepository) UpdateVoucherStatus(tx *sqlx.Tx, id int64, isActive *bool, isPublic *bool) error {
+	if isActive != nil && *isActive {
 		var expired bool
 		checkQuery := `SELECT expired_at <= NOW() FROM tm_vouchers WHERE id = $1 AND deleted_at IS NULL`
 		var err error
@@ -244,16 +260,38 @@ func (r *voucherRepository) UpdateVoucherStatus(tx *sqlx.Tx, id int64, isActive 
 		}
 	}
 
-	query := `UPDATE tm_vouchers SET is_active = $1 WHERE id = $2 AND deleted_at IS NULL`
+	setClauses := []string{}
+	args := []interface{}{}
+	argIdx := 1
+
+	if isActive != nil {
+		setClauses = append(setClauses, fmt.Sprintf("is_active = $%d", argIdx))
+		args = append(args, *isActive)
+		argIdx++
+	}
+
+	if isPublic != nil {
+		setClauses = append(setClauses, fmt.Sprintf("is_public = $%d", argIdx))
+		args = append(args, *isPublic)
+		argIdx++
+	}
+
+	if len(setClauses) == 0 {
+		return nil
+	}
+
+	args = append(args, id)
+	query := fmt.Sprintf("UPDATE tm_vouchers SET %s WHERE id = $%d AND deleted_at IS NULL", strings.Join(setClauses, ", "), argIdx)
+
 	var err error
 	var info sql.Result
 	if tx != nil {
-		info, err = tx.Exec(query, isActive, id)
+		info, err = tx.Exec(query, args...)
 	} else {
-		info, err = r.db.Exec(query, isActive, id)
+		info, err = r.db.Exec(query, args...)
 	}
 	if err != nil {
-		log.Error("Failed to update voucher status:", err)
+		log.Error("Failed to update voucher status/visibility:", err)
 		return response.InternalServerError("Failed to update voucher status", nil)
 	}
 

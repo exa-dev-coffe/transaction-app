@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -128,19 +129,61 @@ func SetupMockExternalServices() *httptest.Server {
 
 		switch r.URL.Path {
 		case "/api/internal/available-menus-table":
-			_, _ = w.Write([]byte(`{
-				"success": true,
-				"message": "Success",
-				"data": [
-					{"id": 10, "name": "Espresso", "price": 25000, "description": "Coffee", "photo": "coffee.jpg"}
-				]
-			}`))
+			idsParam := r.URL.Query().Get("ids")
+			if strings.Contains(idsParam, "11") && !strings.Contains(idsParam, "10") {
+				_, _ = w.Write([]byte(`{
+					"success": true,
+					"message": "Success",
+					"data": [
+						{
+							"id": 11,
+							"name": "Matcha Latte",
+							"price": 30000,
+							"effectivePrice": 24000,
+							"discount": {
+								"promotionId": 99,
+								"promotionName": "Flash Promo 20%",
+								"discountType": "PERCENTAGE",
+								"discountValue": 20,
+								"savings": 6000
+							},
+							"description": "Matcha",
+							"photo": "matcha.jpg"
+						}
+					]
+				}`))
+			} else {
+				_, _ = w.Write([]byte(`{
+					"success": true,
+					"message": "Success",
+					"data": [
+						{"id": 10, "name": "Espresso", "price": 25000, "description": "Coffee", "photo": "coffee.jpg"}
+					]
+				}`))
+			}
 		case "/api/internal/data-menus-table":
 			_, _ = w.Write([]byte(`{
 				"success": true,
 				"message": "Success",
 				"data": {
-					"menus": [{"id": 10, "name": "Espresso", "price": 25000, "description": "Coffee", "photo": "coffee.jpg"}],
+					"menus": [
+						{"id": 10, "name": "Espresso", "price": 25000, "description": "Coffee", "photo": "coffee.jpg"},
+						{
+							"id": 11,
+							"name": "Matcha Latte",
+							"price": 30000,
+							"effectivePrice": 24000,
+							"discount": {
+								"promotionId": 99,
+								"promotionName": "Flash Promo 20%",
+								"discountType": "PERCENTAGE",
+								"discountValue": 20,
+								"savings": 6000
+							},
+							"description": "Matcha",
+							"photo": "matcha.jpg"
+						}
+					],
 					"tables": [{"id": 1, "name": "Table 1"}, {"id": 3, "name": "Table 3"}]
 				}
 			}`))

@@ -22,12 +22,22 @@ type GetMenusAndTableResponse struct {
 	Tables []TableResponse `json:"tables"`
 }
 
+type DiscountDetail struct {
+	PromotionID   int64   `json:"promotionId"`
+	PromotionName string  `json:"promotionName"`
+	DiscountType  string  `json:"discountType"`
+	DiscountValue float64 `json:"discountValue"`
+	Savings       float64 `json:"savings"`
+}
+
 type MenuResponse struct {
-	Id          int     `json:"id" db:"id"`
-	Price       float64 `json:"price" db:"price"`
-	Name        string  `json:"name" db:"name"`
-	Description string  `json:"description" db:"description"`
-	Photo       string  `json:"photo" db:"photo"`
+	Id             int             `json:"id" db:"id"`
+	Price          float64         `json:"price" db:"price"`
+	EffectivePrice float64         `json:"effectivePrice" db:"effectivePrice"`
+	Discount       *DiscountDetail `json:"discount,omitempty"`
+	Name           string          `json:"name" db:"name"`
+	Description    string          `json:"description" db:"description"`
+	Photo          string          `json:"photo" db:"photo"`
 }
 
 type TableResponse struct {
@@ -80,6 +90,7 @@ type TransactionResponse struct {
 	UpdatedAt      string                  `json:"updatedAt" db:"updated_at"`
 	TableId        int64                   `json:"tableId" db:"table_id"`
 	VoucherId      *int64                  `json:"voucherId" db:"voucher_id"`
+	VoucherCode    string                  `json:"voucherCode" db:"voucher_code"`
 	DiscountAmount float64                 `json:"discountAmount" db:"discount_amount"`
 	Details        JSONBTransactionDetails `json:"details" db:"details"`
 }
@@ -99,16 +110,19 @@ func (d *JSONBTransactionDetails) Scan(value interface{}) error {
 }
 
 type TransactionDetail struct {
-	MenuId      int     `json:"menuId" db:"menuId"`
-	Qty         int     `json:"qty" db:"qty"`
-	Price       float64 `json:"price" db:"price"`
-	Id          int     `json:"id" db:"id"`
-	Notes       string  `json:"notes" db:"notes"`
-	TotalPrice  float64 `json:"totalPrice" db:"totalPrice"`
-	Rating      *int8   `json:"rating" db:"rating"`
-	Description string  `json:"description" db:"description"`
-	MenuName    string  `json:"menuName"`
-	Photo       string  `json:"photo" db:"photo"`
+	MenuId        int     `json:"menuId" db:"menuId"`
+	Qty           int     `json:"qty" db:"qty"`
+	Price         float64 `json:"price" db:"price"`
+	OriginalPrice float64 `json:"originalPrice,omitempty" db:"originalPrice"`
+	PromoDiscount float64 `json:"promoDiscount,omitempty" db:"promoDiscount"`
+	PromotionId   *int64  `json:"promotionId,omitempty" db:"promotionId"`
+	Id            int     `json:"id" db:"id"`
+	Notes         string  `json:"notes" db:"notes"`
+	TotalPrice    float64 `json:"totalPrice" db:"totalPrice"`
+	Rating        *int8   `json:"rating" db:"rating"`
+	Description   string  `json:"description" db:"description"`
+	MenuName      string  `json:"menuName"`
+	Photo         string  `json:"photo" db:"photo"`
 }
 
 type UpdateOrderStatusRequest struct {

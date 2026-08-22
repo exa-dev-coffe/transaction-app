@@ -9,6 +9,7 @@ SELECT
 	t.user_id,
 	t.order_for,
 	t.voucher_id,
+	COALESCE(MAX(v.code), '') AS voucher_code,
 	t.discount_amount,
 	t.created_at,
 	t.updated_at,
@@ -25,6 +26,7 @@ SELECT
     ) AS details
 	FROM th_user_checkouts t
 JOIN td_user_checkouts td ON t.id = td.ref_id
+LEFT JOIN tm_vouchers v ON t.voucher_id = v.id
 	`
 
 var mappingFieds = map[string]string{

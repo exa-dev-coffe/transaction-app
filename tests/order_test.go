@@ -265,4 +265,220 @@ func TestOrderCheckoutSuite(t *testing.T) {
 			t.Errorf("Expected statusBreakdown in summary report data to be non-nil")
 		}
 	})
+
+	t.Run("POST /checkout - Create Order Transaction With Valid Voucher Code", func(t *testing.T) {
+		// 1. Seed a valid voucher in PostgreSQL
+		_, _ = dbConn.Exec(`DELETE FROM tm_vouchers WHERE code = 'CHECKOUT_PROMO'`)
+
+		var voucherId int64
+		err := dbConn.QueryRow(`
+			INSERT INTO tm_vouchers (code, discount_type, discount_value, min_purchase, quota, is_active, expired_at)
+			VALUES ('CHECKOUT_PROMO', 'FIXED', 10000.00, 20000.00, 10, true, CURRENT_TIMESTAMP + INTERVAL '1 day')
+			RETURNING id
+		`).Scan(&voucherId)
+		if err != nil {
+			t.Fatalf("Failed to seed voucher for test: %v", err)
+		}
+
+		body := []byte(`{
+			"tableId": 3,
+			"orderFor": "Dine In Voucher",
+			"pin": "123456",
+			"voucherCode": "CHECKOUT_PROMO",
+			"datas": [{"menuId": 10, "qty": 2, "price": 25000.00, "total": 50000.00}],
+			"total": 50000.00
+		}`)
+		resp, err := ExecuteTestRequest(app, "POST", "/api/1.0/checkout", body, customerToken)
+		if err != nil {
+			t.Fatalf("Request failed: %v", err)
+		}
+		if resp.StatusCode != 201 {
+			respBody, _ := io.ReadAll(resp.Body)
+			t.Fatalf("Expected HTTP 201 Created, got %v: %s", resp.StatusCode, string(respBody))
+		}
+
+		respBody, _ := io.ReadAll(resp.Body)
+		var res createTransactionResponse
+		if err := json.Unmarshal(respBody, &res); err != nil {
+			t.Fatalf("Failed to unmarshal response JSON: %v", err)
+		}
+
+		if !res.Success {
+			t.Errorf("Expected success true, got false: %s", string(respBody))
+		}
+
+		// Verify transaction record in th_user_checkouts has voucher_id, discount_amount, and net total_price
+		var createdId int64
+		var dbVoucherId int64
+		var discountAmount float64
+		var totalPrice float64
+		err = dbConn.QueryRow(`SELECT id, voucher_id, discount_amount, total_price FROM th_user_checkouts WHERE user_id = 100 AND order_for = 'Dine In Voucher' ORDER BY id DESC LIMIT 1`).Scan(&createdId, &dbVoucherId, &discountAmount, &totalPrice)
+		if err != nil {
+			t.Fatalf("Failed to query created transaction from DB: %v", err)
+		}
+
+		if dbVoucherId != voucherId {
+			t.Errorf("Expected dbVoucherId %d, got %d", voucherId, dbVoucherId)
+		}
+		if discountAmount != 10000.00 {
+			t.Errorf("Expected discountAmount 10000.00, got %f", discountAmount)
+		}
+		if totalPrice != 40000.00 {
+			t.Errorf("Expected net totalPrice 40000.00 (50000 - 10000), got %f", totalPrice)
+		}
+
+		// Verify voucher usage logged in tr_voucher_usages
+		var usageCount int
+		_ = dbConn.Get(&usageCount, `SELECT count(*) FROM tr_voucher_usages WHERE checkout_id = $1 AND voucher_id = $2`, createdId, voucherId)
+		if usageCount != 1 {
+			t.Errorf("Expected 1 usage record in tr_voucher_usages, got %d", usageCount)
+		}
+
+		// Verify voucher quota decremented from 10 to 9
+		var currentQuota int
+		_ = dbConn.Get(&currentQuota, `SELECT quota FROM tm_vouchers WHERE id = $1`, voucherId)
+		if currentQuota != 9 {
+			t.Errorf("Expected quota decremented to 9, got %d", currentQuota)
+		}
+	})
+
+	t.Run("POST /checkout - Reject Checkout With Expired Voucher Code", func(t *testing.T) {
+		// Seed an expired voucher
+		_, _ = dbConn.Exec(`DELETE FROM tm_vouchers WHERE code = 'EXPIRED_CHECKOUT_PROMO'`)
+		_, err := dbConn.Exec(`
+			INSERT INTO tm_vouchers (code, discount_type, discount_value, min_purchase, quota, is_active, expired_at)
+			VALUES ('EXPIRED_CHECKOUT_PROMO', 'FIXED', 10000.00, 10000.00, 10, true, CURRENT_TIMESTAMP - INTERVAL '1 day')
+		`)
+		if err != nil {
+			t.Fatalf("Failed to seed expired voucher: %v", err)
+		}
+
+		body := []byte(`{
+			"tableId": 3,
+			"orderFor": "Dine In Expired",
+			"pin": "123456",
+			"voucherCode": "EXPIRED_CHECKOUT_PROMO",
+			"datas": [{"menuId": 10, "qty": 2, "price": 25000.00, "total": 50000.00}],
+			"total": 50000.00
+		}`)
+		resp, err := ExecuteTestRequest(app, "POST", "/api/1.0/checkout", body, customerToken)
+		if err != nil {
+			t.Fatalf("Request failed: %v", err)
+		}
+		if resp.StatusCode != 400 && resp.StatusCode != 404 {
+			t.Fatalf("Expected HTTP 400/404 for expired voucher, got %v", resp.StatusCode)
+		}
+	})
+
+	t.Run("POST /checkout - Create Order Transaction With Product Promo Discount", func(t *testing.T) {
+		body := []byte(`{
+			"tableId": 1,
+			"orderFor": "Dine In Product Promo",
+			"pin": "123456",
+			"datas": [{"menuId": 11, "qty": 2, "price": 24000.00, "total": 48000.00}],
+			"total": 48000.00
+		}`)
+		resp, err := ExecuteTestRequest(app, "POST", "/api/1.0/checkout", body, customerToken)
+		if err != nil {
+			t.Fatalf("Request failed: %v", err)
+		}
+		if resp.StatusCode != 201 {
+			respBody, _ := io.ReadAll(resp.Body)
+			t.Fatalf("Expected HTTP 201 Created, got %v: %s", resp.StatusCode, string(respBody))
+		}
+
+		// Verify transaction record created in th_user_checkouts with effective price total (48,000)
+		var createdId int64
+		var totalPrice float64
+		err = dbConn.QueryRow(`SELECT id, total_price FROM th_user_checkouts WHERE user_id = 100 AND order_for = 'Dine In Product Promo' ORDER BY id DESC LIMIT 1`).Scan(&createdId, &totalPrice)
+		if err != nil {
+			t.Fatalf("Failed to query product promo transaction from DB: %v", err)
+		}
+
+		if totalPrice != 48000.00 {
+			t.Errorf("Expected effective total_price 48000.00, got %f", totalPrice)
+		}
+
+		// Verify promotion usage logged in tr_promotion_usages (promotion_id = 99, menu_id = 11, qty = 2, discount_amount = 12000)
+		var promoUsageCount int
+		var promoDiscountSum float64
+		err = dbConn.QueryRow(`SELECT count(*), COALESCE(SUM(discount_amount), 0) FROM tr_promotion_usages WHERE transaction_id = $1 AND promotion_id = 99`, createdId).Scan(&promoUsageCount, &promoDiscountSum)
+		if err != nil {
+			t.Fatalf("Failed to query tr_promotion_usages from DB: %v", err)
+		}
+
+		if promoUsageCount != 1 {
+			t.Errorf("Expected 1 promotion usage record in tr_promotion_usages, got %d", promoUsageCount)
+		}
+		if promoDiscountSum != 12000.00 {
+			t.Errorf("Expected total promo discount sum 12000.00 (6000 * 2), got %f", promoDiscountSum)
+		}
+	})
+
+	t.Run("POST /checkout - Create Order Transaction With BOTH Product Promo Discount AND Voucher Code", func(t *testing.T) {
+		// Seed a voucher for this combined test
+		_, _ = dbConn.Exec(`DELETE FROM tm_vouchers WHERE code = 'COMBINED_PROMO'`)
+		var voucherId int64
+		err := dbConn.QueryRow(`
+			INSERT INTO tm_vouchers (code, discount_type, discount_value, min_purchase, quota, is_active, expired_at)
+			VALUES ('COMBINED_PROMO', 'FIXED', 8000.00, 20000.00, 5, true, CURRENT_TIMESTAMP + INTERVAL '1 day')
+			RETURNING id
+		`).Scan(&voucherId)
+		if err != nil {
+			t.Fatalf("Failed to seed combined promo voucher: %v", err)
+		}
+
+		// Menu 11 has effective price 24,000 * 2 = 48,000. Plus voucher COMBINED_PROMO discount 8,000. Net total = 40,000.
+		body := []byte(`{
+			"tableId": 1,
+			"orderFor": "Dine In Combined Promo",
+			"pin": "123456",
+			"voucherCode": "COMBINED_PROMO",
+			"datas": [{"menuId": 11, "qty": 2, "price": 24000.00, "total": 48000.00}],
+			"total": 48000.00
+		}`)
+		resp, err := ExecuteTestRequest(app, "POST", "/api/1.0/checkout", body, customerToken)
+		if err != nil {
+			t.Fatalf("Request failed: %v", err)
+		}
+		if resp.StatusCode != 201 {
+			respBody, _ := io.ReadAll(resp.Body)
+			t.Fatalf("Expected HTTP 201 Created, got %v: %s", resp.StatusCode, string(respBody))
+		}
+
+		// Verify transaction record in th_user_checkouts has net total 40,000 (48,000 - 8,000)
+		var createdId int64
+		var dbVoucherId int64
+		var discountAmount float64
+		var totalPrice float64
+		err = dbConn.QueryRow(`SELECT id, voucher_id, discount_amount, total_price FROM th_user_checkouts WHERE user_id = 100 AND order_for = 'Dine In Combined Promo' ORDER BY id DESC LIMIT 1`).Scan(&createdId, &dbVoucherId, &discountAmount, &totalPrice)
+		if err != nil {
+			t.Fatalf("Failed to query combined promo transaction from DB: %v", err)
+		}
+
+		if dbVoucherId != voucherId {
+			t.Errorf("Expected dbVoucherId %d, got %d", voucherId, dbVoucherId)
+		}
+		if discountAmount != 8000.00 {
+			t.Errorf("Expected voucher discountAmount 8000.00, got %f", discountAmount)
+		}
+		if totalPrice != 40000.00 {
+			t.Errorf("Expected net totalPrice 40000.00 (48000 - 8000), got %f", totalPrice)
+		}
+
+		// Verify product promo usage logged in tr_promotion_usages (promotion_id = 99, sum = 12,000)
+		var promoUsageCount int
+		var promoDiscountSum float64
+		_ = dbConn.QueryRow(`SELECT count(*), COALESCE(SUM(discount_amount), 0) FROM tr_promotion_usages WHERE transaction_id = $1 AND promotion_id = 99`, createdId).Scan(&promoUsageCount, &promoDiscountSum)
+		if promoUsageCount != 1 || promoDiscountSum != 12000.00 {
+			t.Errorf("Expected 1 promo usage with sum 12000.00, got count %d sum %f", promoUsageCount, promoDiscountSum)
+		}
+
+		// Verify voucher usage logged in tr_voucher_usages (voucher_id = voucherId, discount_amount = 8,000)
+		var voucherUsageCount int
+		_ = dbConn.Get(&voucherUsageCount, `SELECT count(*) FROM tr_voucher_usages WHERE checkout_id = $1 AND voucher_id = $2`, createdId, voucherId)
+		if voucherUsageCount != 1 {
+			t.Errorf("Expected 1 voucher usage record in tr_voucher_usages, got %d", voucherUsageCount)
+		}
+	})
 }

@@ -35,9 +35,9 @@ func NewHandler(app *fiber.App, service Service) Handler {
 	// Internal Callback (Worker side)
 	routes.Post("/internal/vouchers/deactivate", middleware.RequireInternalSecret, h.DeactivateVoucher)
 
-	// Admin CRUD
+	// Admin & User Vouchers
 	routes.Post("/vouchers", middleware.RequireRole("admin"), h.CreateVoucher)
-	routes.Get("/vouchers", middleware.RequireRole("admin"), h.GetListVouchers)
+	routes.Get("/vouchers", middleware.RequireAuth, h.GetListVouchers)
 	routes.Delete("/vouchers/:id", middleware.RequireRole("admin"), h.DeleteVoucher)
 	routes.Patch("/vouchers/:id/status", middleware.RequireRole("admin"), h.UpdateVoucherStatus)
 
@@ -129,7 +129,17 @@ func (h *handler) GetListVouchers(c *fiber.Ctx) error {
 		return err
 	}
 
-	res, err := h.service.GetListVouchers(paramsListRequest)
+	claims, err := common.GetClaimsFromLocals(c)
+	if err != nil {
+		return err
+	}
+
+	// SECURITY ENFORCEMENT:
+	// Only Admin role can retrieve non-public (is_public = FALSE) secret vouchers.
+	// For all non-admin users (Customer, Barista, etc.), the backend strictly forces is_public = TRUE at SQL level!
+	isPublicOnly := claims.Role != "admin"
+
+	res, err := h.service.GetListVouchers(paramsListRequest, isPublicOnly, claims.UserId)
 	if err != nil {
 		return err
 	}
@@ -167,7 +177,7 @@ func (h *handler) UpdateVoucherStatus(c *fiber.Ctx) error {
 		return response.BadRequest("Invalid request body", nil)
 	}
 
-	err = h.service.UpdateVoucherStatus(nil, id, request.IsActive)
+	err = h.service.UpdateVoucherStatus(nil, id, request.IsActive, request.IsPublic)
 	if err != nil {
 		return err
 	}

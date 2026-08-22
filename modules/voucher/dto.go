@@ -9,6 +9,7 @@ type Voucher struct {
 	MinPurchase   float64   `json:"minPurchase" db:"min_purchase"`
 	Quota         int       `json:"quota" db:"quota"`
 	IsActive      bool      `json:"isActive" db:"is_active"`
+	IsPublic      bool      `json:"isPublic" db:"is_public"`
 	ExpiredAt     string    `json:"expiredAt" db:"expired_at"`
 	CreatedAt     string    `json:"createdAt" db:"created_at"`
 	CreatedBy     *int64    `json:"createdBy" db:"created_by"`
@@ -24,6 +25,7 @@ type CreateVoucherRequest struct {
 	MaxDiscount   float64 `json:"maxDiscount"`
 	MinPurchase   float64 `json:"minPurchase"`
 	Quota         int     `json:"quota"`
+	IsPublic      *bool   `json:"isPublic"`
 	ExpiredAt     string  `json:"expiredAt" validate:"required"`
 	CreatedBy     int64   `json:"createdBy"`
 }
@@ -38,8 +40,13 @@ type ValidateVoucherResponse struct {
 	DiscountAmount float64 `json:"discountAmount"`
 	FinalTotal     float64 `json:"finalTotal"`
 	Message        string  `json:"message"`
+	DiscountType   string  `json:"discountType,omitempty"`
+	DiscountValue  float64 `json:"discountValue,omitempty"`
+	MaxDiscount    float64 `json:"maxDiscount,omitempty"`
+	MinPurchase    float64 `json:"minPurchase,omitempty"`
 }
 
 type UpdateVoucherStatusRequest struct {
-	IsActive bool `json:"isActive"`
+	IsActive *bool `json:"isActive"`
+	IsPublic *bool `json:"isPublic"`
 }
