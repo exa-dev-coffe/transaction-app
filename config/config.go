@@ -30,6 +30,7 @@ type appConfig struct {
 	RabbitmqUrl          string
 	ServiceAccountUrl    string
 	RedisUrl             string
+	RedisUsername        string
 	RedisPassword        string
 	ServiceTransactionUrl string
 }
@@ -69,6 +70,7 @@ func init() {
 		RabbitmqUrl:          viper.GetString("RABBITMQ_URL"),
 		ServiceAccountUrl:    viper.GetString("SERVICE_ACCOUNT_URL"),
 		RedisUrl:             viper.GetString("REDIS_URL"),
+		RedisUsername:        viper.GetString("REDIS_USERNAME"),
 		RedisPassword:        viper.GetString("REDIS_PASSWORD"),
 		ServiceTransactionUrl: viper.GetString("SERVICE_TRANSACTION_URL"),
 	}
