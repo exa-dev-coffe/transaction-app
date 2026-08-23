@@ -164,14 +164,8 @@ func primeStandardPermissions() {
 	adminBytes, _ := json.Marshal(adminPerms)
 	lib.RedisClient.Set(ctx, "auth:role_permissions:1", string(adminBytes), 24*time.Hour)
 
-	// User / Customer (role 2)
-	userPerms := map[string]common.PermissionAction{
-		"catalog":   {View: true},
-		"category":  {View: true},
-		"table":     {View: true},
-		"voucher":   {View: true},
-		"promotion": {View: true},
-	}
+	// User / Customer (role 2) - No management/staff permissions
+	userPerms := map[string]common.PermissionAction{}
 	userBytes, _ := json.Marshal(userPerms)
 	lib.RedisClient.Set(ctx, "auth:role_permissions:2", string(userBytes), 24*time.Hour)
 
@@ -318,11 +312,7 @@ func GenerateTestToken(userId int64, email, role string) string {
 		perms["inventory"] = common.PermissionAction{View: true, Edit: true}
 		perms["report"] = common.PermissionAction{View: true}
 	} else {
-		perms["catalog"] = common.PermissionAction{View: true}
-		perms["category"] = common.PermissionAction{View: true}
-		perms["table"] = common.PermissionAction{View: true}
-		perms["promotion"] = common.PermissionAction{View: true}
-		perms["voucher"] = common.PermissionAction{View: true}
+		// User / Customer (role 2) has no staff permissions
 	}
 
 	if lib.RedisClient != nil && len(perms) > 0 {

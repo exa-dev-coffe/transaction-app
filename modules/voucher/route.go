@@ -3,6 +3,7 @@ package voucher
 import (
 	"log/slog"
 	"strconv"
+	"strings"
 
 	"eka-dev.cloud/transaction-service/lib"
 	"eka-dev.cloud/transaction-service/middleware"
@@ -134,10 +135,10 @@ func (h *handler) GetListVouchers(c *fiber.Ctx) error {
 		return err
 	}
 
-	// SECURITY ENFORCEMENT:
-	// Only Admin role can retrieve non-public (is_public = FALSE) secret vouchers.
-	// For all non-admin users (Customer, Barista, etc.), the backend strictly forces is_public = TRUE at SQL level!
-	isPublicOnly := claims.Role != "admin"
+	// SECURITY ENFORCEMENT & PBAC:
+	// Admin or any custom role with "voucher" view permission can retrieve non-public (is_public = FALSE) secret vouchers.
+	// For regular customer users (who don't have voucher management permission), isPublicOnly is strictly forced to TRUE at SQL level!
+	isPublicOnly := !canViewAllVouchers(claims)
 
 	res, err := h.service.GetListVouchers(paramsListRequest, isPublicOnly, claims.UserId)
 	if err != nil {
@@ -145,6 +146,24 @@ func (h *handler) GetListVouchers(c *fiber.Ctx) error {
 	}
 
 	return c.Status(fiber.StatusOK).JSON(response.Success("Success", res))
+}
+
+func canViewAllVouchers(claims *common.Claims) bool {
+	if claims == nil {
+		return false
+	}
+	if strings.EqualFold(claims.Role, "admin") || claims.RoleId == 1 {
+		return true
+	}
+	if claims.RoleId > 0 {
+		perms, err := middleware.FetchRolePermissions(claims.RoleId)
+		if err == nil && perms != nil {
+			if voucherPerm, ok := perms["voucher"]; ok && voucherPerm.View {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (h *handler) DeleteVoucher(c *fiber.Ctx) error {
