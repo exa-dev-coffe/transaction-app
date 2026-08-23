@@ -33,13 +33,22 @@ func NewHandler(app *fiber.App, service Service, db *sqlx.DB) Handler {
 
 	routes := app.Group("/api/1.0")
 	routes.Post("/checkout", middleware.RequireAuth, h.CreateTransaction)
-	routes.Get("/transactions", middleware.RequireRole("admin", "barista"), h.GetListTransactions)
-	routes.Get("/transactions/detail", middleware.RequireRole("admin", "barista"), h.GetOneTransaction)
+	routes.Get("/transactions", middleware.RequireAnyPermission(
+		middleware.FeatureAction{Feature: "order", Action: "view"},
+		middleware.FeatureAction{Feature: "report", Action: "view"},
+	), h.GetListTransactions)
+	routes.Get("/transactions/detail", middleware.RequireAnyPermission(
+		middleware.FeatureAction{Feature: "order", Action: "view"},
+		middleware.FeatureAction{Feature: "report", Action: "view"},
+	), h.GetOneTransaction)
 	routes.Get("/history-checkouts", middleware.RequireAuth, h.GetListTransactionsByUserId)
 	routes.Get("/history-checkouts/detail", middleware.RequireAuth, h.GetOneTransactionByUserId)
-	routes.Patch("/transactions/update-order-status", middleware.RequireRole("admin", "barista"), h.UpdateOrderStatus)
+	routes.Patch("/transactions/update-order-status", middleware.RequirePermission("order", "edit"), h.UpdateOrderStatus)
 	routes.Patch("/history-checkouts/set-rating-menu", middleware.RequireAuth, h.SetRatingMenu)
-	routes.Get("/transactions/summary-report", middleware.RequireRole("admin", "barista"), h.SummaryReportTransactions)
+	routes.Get("/transactions/summary-report", middleware.RequireAnyPermission(
+		middleware.FeatureAction{Feature: "report", Action: "view"},
+		middleware.FeatureAction{Feature: "order", Action: "view"},
+	), h.SummaryReportTransactions)
 
 	return h
 }

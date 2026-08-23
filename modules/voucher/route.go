@@ -36,10 +36,10 @@ func NewHandler(app *fiber.App, service Service) Handler {
 	routes.Post("/internal/vouchers/deactivate", middleware.RequireInternalSecret, h.DeactivateVoucher)
 
 	// Admin & User Vouchers
-	routes.Post("/vouchers", middleware.RequireRole("admin"), h.CreateVoucher)
+	routes.Post("/vouchers", middleware.RequirePermission("voucher", "create"), h.CreateVoucher)
 	routes.Get("/vouchers", middleware.RequireAuth, h.GetListVouchers)
-	routes.Delete("/vouchers/:id", middleware.RequireRole("admin"), h.DeleteVoucher)
-	routes.Patch("/vouchers/:id/status", middleware.RequireRole("admin"), h.UpdateVoucherStatus)
+	routes.Delete("/vouchers/:id", middleware.RequirePermission("voucher", "delete"), h.DeleteVoucher)
+	routes.Patch("/vouchers/:id/status", middleware.RequirePermission("voucher", "edit"), h.UpdateVoucherStatus)
 
 	return h
 }
