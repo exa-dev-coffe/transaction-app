@@ -39,7 +39,7 @@ func (r *voucherRepository) GetVoucherByCode(tx *sqlx.Tx, code string) (*Voucher
 	
 	var err error
 	if tx != nil {
-		err = tx.Get(&voucher, query, code)
+		err = tx.Get(&voucher, query+" FOR UPDATE", code)
 	} else {
 		err = r.db.Get(&voucher, query, code)
 	}

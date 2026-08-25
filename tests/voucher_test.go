@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"sync"
 	"testing"
 )
 
@@ -58,6 +59,9 @@ type genericResponse struct {
 func TestVoucherSuite(t *testing.T) {
 	dbConn, teardown := SetupTestPostgresTransaction(t)
 	defer teardown()
+
+	mockServer := SetupMockExternalServices()
+	defer mockServer.Close()
 
 	app := SetupTestApp(dbConn)
 	customerToken := GenerateTestToken(100, "user@test.com", "customer")
@@ -486,6 +490,87 @@ func TestVoucherSuite(t *testing.T) {
 		_ = dbConn.Get(&deletedAt, "SELECT deleted_at FROM tm_vouchers WHERE id = 11")
 		if deletedAt == nil {
 			t.Errorf("Expected voucher 11 deleted_at to be populated in PostgreSQL DB")
+		}
+	})
+
+	t.Run("CONCURRENCY - Two Users Fighting for Last Remaining Voucher (Quota = 1, FOR UPDATE Lock)", func(t *testing.T) {
+		// 1. Seed a voucher with quota = 1
+		_, _ = dbConn.Exec(`DELETE FROM tm_vouchers WHERE code = 'LAST_VOUCHER'`)
+		var voucherId int64
+		err := dbConn.QueryRow(`
+			INSERT INTO tm_vouchers (code, discount_type, discount_value, min_purchase, quota, is_active, expired_at)
+			VALUES ('LAST_VOUCHER', 'FIXED', 5000.00, 20000.00, 1, true, CURRENT_TIMESTAMP + INTERVAL '1 day')
+			RETURNING id
+		`).Scan(&voucherId)
+		if err != nil {
+			t.Fatalf("Failed to seed race voucher: %v", err)
+		}
+
+		user1Token := GenerateTestToken(101, "user1@test.com", "customer")
+		user2Token := GenerateTestToken(102, "user2@test.com", "customer")
+
+		body := []byte(`{
+			"tableId": 1,
+			"orderFor": "Race Checkout",
+			"pin": "123456",
+			"voucherCode": "LAST_VOUCHER",
+			"datas": [{"menuId": 10, "qty": 2, "price": 25000.00, "total": 50000.00}],
+			"total": 50000.00
+		}`)
+
+		var wg sync.WaitGroup
+		wg.Add(2)
+
+		var status1, status2 int
+		startSignal := make(chan struct{})
+
+		go func() {
+			defer wg.Done()
+			<-startSignal
+			resp, _ := ExecuteTestRequest(app, "POST", "/api/1.0/checkout", body, user1Token)
+			if resp != nil {
+				status1 = resp.StatusCode
+			}
+		}()
+
+		go func() {
+			defer wg.Done()
+			<-startSignal
+			resp, _ := ExecuteTestRequest(app, "POST", "/api/1.0/checkout", body, user2Token)
+			if resp != nil {
+				status2 = resp.StatusCode
+			}
+		}()
+
+		// Trigger both requests at the exact same moment
+		close(startSignal)
+		wg.Wait()
+
+		// Exactly one must succeed (201) and the other must fail (400)
+		successCount := 0
+		if status1 == 201 {
+			successCount++
+		}
+		if status2 == 201 {
+			successCount++
+		}
+
+		if successCount != 1 {
+			t.Errorf("Expected exactly 1 checkout to succeed with quota=1, but user1 got %d and user2 got %d", status1, status2)
+		}
+
+		// Verify database state: Quota must be 0 (never negative)
+		var finalQuota int
+		_ = dbConn.Get(&finalQuota, "SELECT quota FROM tm_vouchers WHERE id = $1", voucherId)
+		if finalQuota != 0 {
+			t.Errorf("Expected final quota to be 0, got %d", finalQuota)
+		}
+
+		// Verify voucher usage record count = exactly 1
+		var usageCount int
+		_ = dbConn.Get(&usageCount, "SELECT count(*) FROM tr_voucher_usages WHERE voucher_id = $1", voucherId)
+		if usageCount != 1 {
+			t.Errorf("Expected exactly 1 voucher usage in tr_voucher_usages, got %d", usageCount)
 		}
 	})
 }

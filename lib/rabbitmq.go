@@ -231,99 +231,122 @@ func ListenQueue(
 	consumeArgs amqp.Table, // ← buat Consume
 ) error {
 
-	if exchange != "" {
-		// 1️⃣ Declare exchange
-		if err := ch.ExchangeDeclare(
-			exchange,
-			string(exchangeType),
-			durable,
-			autoDelete,
-			false,
-			noWait,
-			nil,
-		); err != nil {
-			return err
-		}
-	}
-
-	// 2️⃣ Declare queue
-	q, err := ch.QueueDeclare(
-		queueName,
-		durable,
-		autoDelete,
-		exclusive,
-		noWait,
-		nil,
-	)
-	if err != nil {
-		return err
-	}
-
-	if exchange != "" {
-		// 3️⃣ Bind ke exchange (pakai bindHeaders)
-		if err := ch.QueueBind(
-			q.Name,
-			routingKey,
-			exchange,
-			noWait,
-			bindHeaders,
-		); err != nil {
-			return err
-		}
-	}
-
-	// 4️⃣ Consume (pakai consumeArgs)
-	msgs, err := ch.Consume(
-		q.Name,
-		consumerName,
-		autoAck,
-		exclusive,
-		noLocal,
-		noWait,
-		consumeArgs,
-	)
-	if err != nil {
-		return err
-	}
-
-	slog.Info("Listening queue", "queue", q.Name, "exchange", exchange, "routing_key", routingKey, "consumer", consumerName)
+	slog.Info("Initializing resilient queue listener", "queue", queueName, "exchange", exchange, "routing_key", routingKey, "consumer", consumerName)
 
 	go func() {
 		tracer := otel.GetTracerProvider().Tracer("rabbitmq-client")
 		propagator := otel.GetTextMapPropagator()
 
-		for msg := range msgs {
-			var carrier AmqpHeaderCarrier
-			if msg.Headers != nil {
-				carrier = AmqpHeaderCarrier(msg.Headers)
-			} else {
-				carrier = make(AmqpHeaderCarrier)
+		for {
+			activeCh, err := GetChannel()
+			if err != nil {
+				slog.Error("Failed to get channel for queue listener, retrying in 5s", "queue", queueName, "error", err)
+				time.Sleep(5 * time.Second)
+				continue
 			}
-			ctx := propagator.Extract(context.Background(), carrier)
 
-			_, span := tracer.Start(ctx, fmt.Sprintf("rabbitmq.consume %s", queueName),
-				trace.WithSpanKind(trace.SpanKindConsumer),
-				trace.WithAttributes(
-					attribute.String("messaging.system", "rabbitmq"),
-					attribute.String("messaging.source", queueName),
-					attribute.String("messaging.operation", "receive"),
-				),
+			if exchange != "" {
+				if err := activeCh.ExchangeDeclare(
+					exchange,
+					string(exchangeType),
+					durable,
+					autoDelete,
+					false,
+					noWait,
+					nil,
+				); err != nil {
+					slog.Error("Failed to declare exchange for listener, retrying in 5s", "exchange", exchange, "error", err)
+					_ = activeCh.Close()
+					time.Sleep(5 * time.Second)
+					continue
+				}
+			}
+
+			q, err := activeCh.QueueDeclare(
+				queueName,
+				durable,
+				autoDelete,
+				exclusive,
+				noWait,
+				nil,
 			)
+			if err != nil {
+				slog.Error("Failed to declare queue for listener, retrying in 5s", "queue", queueName, "error", err)
+				_ = activeCh.Close()
+				time.Sleep(5 * time.Second)
+				continue
+			}
 
-			if err := handler(msg); err != nil {
-				span.RecordError(err)
-				span.SetStatus(codes.Error, err.Error())
-				slog.Error("Handler error", "error", err)
-				if !autoAck {
-					_ = msg.Nack(false, true)
-				}
-			} else {
-				span.SetStatus(codes.Ok, "")
-				if !autoAck {
-					_ = msg.Ack(false)
+			if exchange != "" {
+				if err := activeCh.QueueBind(
+					q.Name,
+					routingKey,
+					exchange,
+					noWait,
+					bindHeaders,
+				); err != nil {
+					slog.Error("Failed to bind queue for listener, retrying in 5s", "queue", queueName, "error", err)
+					_ = activeCh.Close()
+					time.Sleep(5 * time.Second)
+					continue
 				}
 			}
-			span.End()
+
+			msgs, err := activeCh.Consume(
+				q.Name,
+				consumerName,
+				autoAck,
+				exclusive,
+				noLocal,
+				noWait,
+				consumeArgs,
+			)
+			if err != nil {
+				slog.Error("Failed to start consume, retrying in 5s", "queue", queueName, "error", err)
+				_ = activeCh.Close()
+				time.Sleep(5 * time.Second)
+				continue
+			}
+
+			slog.Info("Successfully attached and listening to queue loop", "queue", q.Name, "consumer", consumerName)
+
+			for msg := range msgs {
+				var carrier AmqpHeaderCarrier
+				if msg.Headers != nil {
+					carrier = AmqpHeaderCarrier(msg.Headers)
+				} else {
+					carrier = make(AmqpHeaderCarrier)
+				}
+				ctx := propagator.Extract(context.Background(), carrier)
+
+				_, span := tracer.Start(ctx, fmt.Sprintf("rabbitmq.consume %s", queueName),
+					trace.WithSpanKind(trace.SpanKindConsumer),
+					trace.WithAttributes(
+						attribute.String("messaging.system", "rabbitmq"),
+						attribute.String("messaging.source", queueName),
+						attribute.String("messaging.operation", "receive"),
+					),
+				)
+
+				if err := handler(msg); err != nil {
+					span.RecordError(err)
+					span.SetStatus(codes.Error, err.Error())
+					slog.Error("Handler error", "error", err)
+					if !autoAck {
+						_ = msg.Nack(false, true)
+					}
+				} else {
+					span.SetStatus(codes.Ok, "")
+					if !autoAck {
+						_ = msg.Ack(false)
+					}
+				}
+				span.End()
+			}
+
+			slog.Warn("RabbitMQ consumer channel disconnected or closed. Re-attaching listener in 3s...", "queue", queueName)
+			_ = activeCh.Close()
+			time.Sleep(3 * time.Second)
 		}
 	}()
 

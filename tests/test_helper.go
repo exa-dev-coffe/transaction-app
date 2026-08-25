@@ -160,6 +160,7 @@ func primeStandardPermissions() {
 		"order":     {View: true, Create: true, Edit: true, Delete: true},
 		"inventory": {View: true, Create: true, Edit: true, Delete: true},
 		"report":    {View: true, Create: true, Edit: true, Delete: true},
+		"pos":       {View: true, Create: true, Edit: true, Delete: true},
 	}
 	adminBytes, _ := json.Marshal(adminPerms)
 	lib.RedisClient.Set(ctx, "auth:role_permissions:1", string(adminBytes), 24*time.Hour)
@@ -255,7 +256,45 @@ func SetupMockExternalServices() *httptest.Server {
 			}`))
 		case "/api/internal/pay":
 			_, _ = w.Write([]byte(`{"success": true, "message": "Payment successful"}`))
+		case "/api/internal/pos/wallet/pay":
+			_, _ = w.Write([]byte(`{
+				"success": true,
+				"message": "Payment successful",
+				"data": {
+					"success": true,
+					"userId": 100,
+					"customerName": "Test User",
+					"customerEmail": "user@test.com",
+					"amountPaid": 50000,
+					"remainingBalance": 100000,
+					"message": "Payment successful"
+				}
+			}`))
+		case "/api/internal/pos/wallet/refund":
+			_, _ = w.Write([]byte(`{"success": true, "message": "Refund successful"}`))
+		case "/api/internal/pos/qris/charge":
+			_, _ = w.Write([]byte(`{
+				"success": true,
+				"message": "QRIS generated",
+				"data": {
+					"orderId": "pos-qris-test-123",
+					"qrString": "00020101021226590014ID.LINKAJA.WWW0118936009180000010002",
+					"qrUrl": "https://api.sandbox.midtrans.com/v2/qris/pos-qris-test-123/qr-code",
+					"paymentStatus": "PENDING"
+				}
+			}`))
 		default:
+			if strings.HasPrefix(r.URL.Path, "/api/internal/pos/qris/status/") {
+				_, _ = w.Write([]byte(`{
+					"success": true,
+					"message": "Status retrieved",
+					"data": {
+						"transaction_status": "settlement",
+						"fraud_status": "accept"
+					}
+				}`))
+				return
+			}
 			_, _ = w.Write([]byte(`{"success": true, "message": "Success"}`))
 		}
 	}))
@@ -302,7 +341,7 @@ func GenerateTestToken(userId int64, email, role string) string {
 
 	perms := make(map[string]common.PermissionAction)
 	if roleId == 1 {
-		features := []string{"catalog", "category", "table", "voucher", "promotion", "barista", "order", "inventory", "report", "role_management"}
+		features := []string{"catalog", "category", "table", "voucher", "promotion", "barista", "order", "inventory", "report", "role_management", "pos"}
 		for _, f := range features {
 			perms[f] = common.PermissionAction{View: true, Create: true, Edit: true, Delete: true}
 		}
@@ -355,5 +394,5 @@ func ExecuteTestRequest(app *fiber.App, method, url string, body []byte, token s
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
 
-	return app.Test(req)
+	return app.Test(req, 5000)
 }

@@ -2,8 +2,15 @@ package tests
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"testing"
+	"time"
+
+	"eka-dev.cloud/transaction-service/lib"
+	"eka-dev.cloud/transaction-service/modules/transaction"
+	"eka-dev.cloud/transaction-service/modules/voucher"
+	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 type createTransactionResponse struct {
@@ -479,6 +486,500 @@ func TestOrderCheckoutSuite(t *testing.T) {
 		_ = dbConn.Get(&voucherUsageCount, `SELECT count(*) FROM tr_voucher_usages WHERE checkout_id = $1 AND voucher_id = $2`, createdId, voucherId)
 		if voucherUsageCount != 1 {
 			t.Errorf("Expected 1 voucher usage record in tr_voucher_usages, got %d", voucherUsageCount)
+		}
+	})
+}
+
+func TestPosOrderCheckoutSuite(t *testing.T) {
+	dbConn, teardown := SetupTestPostgresTransaction(t)
+	defer teardown()
+
+	mockServer := SetupMockExternalServices()
+	defer mockServer.Close()
+
+	app := SetupTestApp(dbConn)
+	adminToken := GenerateTestToken(1, "admin@test.com", "admin")
+	customerToken := GenerateTestToken(100, "user@test.com", "customer")
+
+	t.Run("POST /pos/checkout - CASH Dine-In Order", func(t *testing.T) {
+		body := []byte(`{
+			"orderType": "DINE_IN",
+			"tableId": 1,
+			"orderFor": "Walk-in Budi",
+			"paymentMethod": "CASH",
+			"cashAmount": 100000.00,
+			"cashChange": 50000.00,
+			"datas": [{"menuId": 10, "qty": 2, "price": 25000.00, "total": 50000.00}]
+		}`)
+		resp, err := ExecuteTestRequest(app, "POST", "/api/1.0/pos/checkout", body, adminToken)
+		if err != nil {
+			t.Fatalf("Request failed: %v", err)
+		}
+		if resp.StatusCode != 201 {
+			respBody, _ := io.ReadAll(resp.Body)
+			t.Fatalf("Expected HTTP 201 Created, got %v: %s", resp.StatusCode, string(respBody))
+		}
+
+		var res struct {
+			Success bool `json:"success"`
+			Data    struct {
+				Id            int64   `json:"id"`
+				OrderType     string  `json:"orderType"`
+				PaymentMethod string  `json:"paymentMethod"`
+				PaymentStatus string  `json:"paymentStatus"`
+				CashAmount    float64 `json:"cashAmount"`
+				CashChange    float64 `json:"cashChange"`
+				IsCashier     bool    `json:"isCashier"`
+			} `json:"data"`
+		}
+		_ = json.NewDecoder(resp.Body).Decode(&res)
+
+		if !res.Success || res.Data.Id == 0 {
+			t.Errorf("Expected valid POS checkout response, got %+v", res)
+		}
+		if res.Data.PaymentStatus != "PAID" {
+			t.Errorf("Expected paymentStatus 'PAID', got '%s'", res.Data.PaymentStatus)
+		}
+		if res.Data.PaymentMethod != "CASH" {
+			t.Errorf("Expected paymentMethod 'CASH', got '%s'", res.Data.PaymentMethod)
+		}
+		if !res.Data.IsCashier {
+			t.Errorf("Expected isCashier true, got false")
+		}
+
+		// Check database record
+		var isCashier bool
+		var paymentStatus string
+		var cashChange float64
+		err = dbConn.QueryRow(`SELECT is_cashier, payment_status, cash_change FROM th_user_checkouts WHERE id = $1`, res.Data.Id).Scan(&isCashier, &paymentStatus, &cashChange)
+		if err != nil {
+			t.Fatalf("Failed to query th_user_checkouts: %v", err)
+		}
+		if !isCashier || paymentStatus != "PAID" || cashChange != 50000.00 {
+			t.Errorf("DB values mismatch: isCashier=%v, paymentStatus=%s, cashChange=%f", isCashier, paymentStatus, cashChange)
+		}
+	})
+
+	t.Run("POST /pos/checkout - CASH Takeaway Order (No Table)", func(t *testing.T) {
+		body := []byte(`{
+			"orderType": "TAKEAWAY",
+			"orderFor": "Takeaway Guest",
+			"paymentMethod": "CASH",
+			"cashAmount": 50000.00,
+			"cashChange": 0.00,
+			"datas": [{"menuId": 10, "qty": 2, "price": 25000.00, "total": 50000.00}]
+		}`)
+		resp, err := ExecuteTestRequest(app, "POST", "/api/1.0/pos/checkout", body, adminToken)
+		if err != nil {
+			t.Fatalf("Request failed: %v", err)
+		}
+		if resp.StatusCode != 201 {
+			respBody, _ := io.ReadAll(resp.Body)
+			t.Fatalf("Expected HTTP 201 Created, got %v: %s", resp.StatusCode, string(respBody))
+		}
+
+		var res struct {
+			Success bool `json:"success"`
+			Data    struct {
+				Id        int64  `json:"id"`
+				OrderType string `json:"orderType"`
+				TableId   *int64 `json:"tableId"`
+			} `json:"data"`
+		}
+		_ = json.NewDecoder(resp.Body).Decode(&res)
+		if res.Data.OrderType != "TAKEAWAY" {
+			t.Errorf("Expected orderType 'TAKEAWAY', got '%s'", res.Data.OrderType)
+		}
+	})
+
+	t.Run("POST /pos/checkout - WALLET Payment with Dynamic Code", func(t *testing.T) {
+		body := []byte(`{
+			"orderType": "DINE_IN",
+			"tableId": 1,
+			"orderFor": "Wallet Customer",
+			"paymentMethod": "WALLET",
+			"walletPaymentCode": "839201",
+			"datas": [{"menuId": 10, "qty": 2, "price": 25000.00, "total": 50000.00}]
+		}`)
+		resp, err := ExecuteTestRequest(app, "POST", "/api/1.0/pos/checkout", body, adminToken)
+		if err != nil {
+			t.Fatalf("Request failed: %v", err)
+		}
+		if resp.StatusCode != 201 {
+			respBody, _ := io.ReadAll(resp.Body)
+			t.Fatalf("Expected HTTP 201 Created, got %v: %s", resp.StatusCode, string(respBody))
+		}
+
+		var res struct {
+			Success bool `json:"success"`
+			Data    struct {
+				Id            int64  `json:"id"`
+				PaymentMethod string `json:"paymentMethod"`
+				PaymentStatus string `json:"paymentStatus"`
+			} `json:"data"`
+		}
+		_ = json.NewDecoder(resp.Body).Decode(&res)
+
+		if res.Data.PaymentMethod != "WALLET" || res.Data.PaymentStatus != "PAID" {
+			t.Errorf("Expected WALLET PAID, got %+v", res.Data)
+		}
+
+		// Verify user_id resolved from wallet-service is saved in DB
+		var dbUserId int64
+		err = dbConn.QueryRow(`SELECT user_id FROM th_user_checkouts WHERE id = $1`, res.Data.Id).Scan(&dbUserId)
+		if err != nil {
+			t.Fatalf("Failed to query user_id from DB: %v", err)
+		}
+		if dbUserId != 100 {
+			t.Errorf("Expected dbUserId 100 resolved from wallet-service, got %d", dbUserId)
+		}
+	})
+
+	t.Run("POST /pos/checkout - MIDTRANS Dynamic QRIS Charge & Sync", func(t *testing.T) {
+		body := []byte(`{
+			"orderType": "DINE_IN",
+			"tableId": 1,
+			"orderFor": "QRIS Customer",
+			"paymentMethod": "MIDTRANS",
+			"datas": [{"menuId": 10, "qty": 2, "price": 25000.00, "total": 50000.00}]
+		}`)
+		resp, err := ExecuteTestRequest(app, "POST", "/api/1.0/pos/checkout", body, adminToken)
+		if err != nil {
+			t.Fatalf("Request failed: %v", err)
+		}
+		if resp.StatusCode != 201 {
+			respBody, _ := io.ReadAll(resp.Body)
+			t.Fatalf("Expected HTTP 201 Created, got %v: %s", resp.StatusCode, string(respBody))
+		}
+
+		var res struct {
+			Success bool `json:"success"`
+			Data    struct {
+				Id            int64  `json:"id"`
+				PaymentMethod string `json:"paymentMethod"`
+				PaymentStatus string `json:"paymentStatus"`
+				QrString      string `json:"qrString"`
+				QrUrl         string `json:"qrUrl"`
+			} `json:"data"`
+		}
+		_ = json.NewDecoder(resp.Body).Decode(&res)
+
+		if res.Data.PaymentMethod != "MIDTRANS" || res.Data.PaymentStatus != "PENDING" {
+			t.Errorf("Expected MIDTRANS PENDING, got %+v", res.Data)
+		}
+		if res.Data.QrString == "" || res.Data.QrUrl == "" {
+			t.Errorf("Expected qrString and qrUrl populated, got qrString='%s', qrUrl='%s'", res.Data.QrString, res.Data.QrUrl)
+		}
+
+		// Now test Syncing Midtrans QRIS status
+		syncResp, err := ExecuteTestRequest(app, "POST", fmt.Sprintf("/api/1.0/pos/transactions/%d/sync-midtrans", res.Data.Id), nil, adminToken)
+		if err != nil {
+			t.Fatalf("Sync request failed: %v", err)
+		}
+		if syncResp.StatusCode != 200 {
+			syncBody, _ := io.ReadAll(syncResp.Body)
+			t.Fatalf("Expected HTTP 200 OK on sync, got %v: %s", syncResp.StatusCode, string(syncBody))
+		}
+
+		// Verify status changed to PAID in DB
+		var currentPaymentStatus string
+		_ = dbConn.QueryRow(`SELECT payment_status FROM th_user_checkouts WHERE id = $1`, res.Data.Id).Scan(&currentPaymentStatus)
+		if currentPaymentStatus != "PAID" {
+			t.Errorf("Expected payment_status to be updated to 'PAID', got '%s'", currentPaymentStatus)
+		}
+	})
+
+	t.Run("SETTLEMENT - Event-driven SettlePosQrisPayment", func(t *testing.T) {
+		// 1. Create a pending POS QRIS transaction directly in DB
+		var txId int64
+		err := dbConn.QueryRow(`
+			INSERT INTO th_user_checkouts (user_id, table_id, order_for, order_type, payment_method, payment_status, total_price, is_cashier)
+			VALUES (1, 1, 'Async Customer', 'DINE_IN', 'MIDTRANS', 'PENDING', 75000.00, true)
+			RETURNING id
+		`).Scan(&txId)
+		if err != nil {
+			t.Fatalf("Failed to insert pending checkout: %v", err)
+		}
+
+		_, err = dbConn.Exec(`
+			INSERT INTO td_user_checkouts (ref_id, menu_id, qty, price, total_price, created_by)
+			VALUES ($1, 10, 3, 25000.00, 75000.00, 1)
+		`, txId)
+		if err != nil {
+			t.Fatalf("Failed to insert checkout item: %v", err)
+		}
+
+		// 2. Call SettlePosQrisPayment with POS order reference
+		voucherRepo := voucher.NewVoucherRepository(dbConn)
+		voucherService := voucher.NewVoucherService(voucherRepo, dbConn)
+		txRepo := transaction.NewTransactionRepository(dbConn)
+		txService := transaction.NewTransactionService(txRepo, voucherService, dbConn)
+
+		orderRef := fmt.Sprintf("POS-%d-1724410293000", txId)
+		settledRes, err := txService.SettlePosQrisPayment(orderRef, "PAID")
+		if err != nil {
+			t.Fatalf("SettlePosQrisPayment failed: %v", err)
+		}
+		if settledRes.PaymentStatus != "PAID" {
+			t.Errorf("Expected settled status PAID, got %s", settledRes.PaymentStatus)
+		}
+
+		// Verify database state is updated to PAID
+		var updatedStatus string
+		_ = dbConn.QueryRow(`SELECT payment_status FROM th_user_checkouts WHERE id = $1`, txId).Scan(&updatedStatus)
+		if updatedStatus != "PAID" {
+			t.Errorf("Expected DB payment_status 'PAID', got '%s'", updatedStatus)
+		}
+	})
+
+	t.Run("RABBITMQ LISTENER - Real End-to-End pos.payment.settled Consumer", func(t *testing.T) {
+		ch, err := lib.GetChannel()
+		if err != nil {
+			t.Skipf("Skipping RabbitMQ listener test because channel unavailable: %v", err)
+			return
+		}
+		defer ch.Close()
+
+		voucherRepo := voucher.NewVoucherRepository(dbConn)
+		voucherService := voucher.NewVoucherService(voucherRepo, dbConn)
+		txRepo := transaction.NewTransactionRepository(dbConn)
+		txService := transaction.NewTransactionService(txRepo, voucherService, dbConn)
+
+		// Start real RabbitMQ consumer listener
+		transaction.NewListener(ch, txService, dbConn)
+
+		// 1. Insert PENDING POS transaction in DB
+		var txId int64
+		err = dbConn.QueryRow(`
+			INSERT INTO th_user_checkouts (user_id, table_id, order_for, order_type, payment_method, payment_status, total_price, is_cashier)
+			VALUES (1, 1, 'RabbitMQ Consumer Test', 'DINE_IN', 'MIDTRANS', 'PENDING', 50000.00, true)
+			RETURNING id
+		`).Scan(&txId)
+		if err != nil {
+			t.Fatalf("Failed to insert pending checkout: %v", err)
+		}
+
+		_, err = dbConn.Exec(`
+			INSERT INTO td_user_checkouts (ref_id, menu_id, qty, price, total_price, created_by)
+			VALUES ($1, 10, 2, 25000.00, 50000.00, 1)
+		`, txId)
+		if err != nil {
+			t.Fatalf("Failed to insert checkout item: %v", err)
+		}
+
+		// 2. Publish real message to RabbitMQ exchange "pos.payment.settled" (Direct exchange)
+		orderRef := fmt.Sprintf("POS-%d-1724410293000", txId)
+		eventBody := fmt.Sprintf(`{"orderRef":"%s","paymentStatus":"PAID","grossAmount":50000.0}`, orderRef)
+
+		err = lib.SendMessage(ch, "", "", "pos.payment.settled", lib.ExchangeDirect, amqp.Publishing{
+			ContentType: "application/json",
+			Body:        []byte(eventBody),
+		}, eventBody, true, false, false, amqp.Table{})
+		if err != nil {
+			t.Fatalf("Failed to publish RabbitMQ message: %v", err)
+		}
+
+		// 3. Poll DB until listener receives message and updates payment_status to PAID
+		var currentStatus string
+		for i := 0; i < 30; i++ {
+			time.Sleep(100 * time.Millisecond)
+			_ = dbConn.QueryRow(`SELECT payment_status FROM th_user_checkouts WHERE id = $1`, txId).Scan(&currentStatus)
+			if currentStatus == "PAID" {
+				break
+			}
+		}
+
+		if currentStatus != "PAID" {
+			t.Errorf("Expected payment_status to be updated to 'PAID' by RabbitMQ listener, got '%s'", currentStatus)
+		}
+	})
+
+	t.Run("POST /pos/checkout - Forbidden for Normal Customer Token", func(t *testing.T) {
+		body := []byte(`{
+			"orderType": "DINE_IN",
+			"tableId": 1,
+			"orderFor": "Hacker Guest",
+			"paymentMethod": "CASH",
+			"cashAmount": 50000.00,
+			"datas": [{"menuId": 10, "qty": 2, "price": 25000.00, "total": 50000.00}]
+		}`)
+		resp, err := ExecuteTestRequest(app, "POST", "/api/1.0/pos/checkout", body, customerToken)
+		if err != nil {
+			t.Fatalf("Request failed: %v", err)
+		}
+		if resp.StatusCode != 403 {
+			t.Errorf("Expected HTTP 403 Forbidden for customer without pos permission, got %v", resp.StatusCode)
+		}
+	})
+
+	t.Run("PATCH /pos/transactions/:id/change-payment - Forbidden for Normal Customer Token", func(t *testing.T) {
+		body := []byte(`{
+			"paymentMethod": "CASH",
+			"cashAmount": 50000.00,
+			"cashChange": 0.0
+		}`)
+		resp, err := ExecuteTestRequest(app, "PATCH", "/api/1.0/pos/transactions/201/change-payment", body, customerToken)
+		if err != nil {
+			t.Fatalf("Request failed: %v", err)
+		}
+		if resp.StatusCode != 403 {
+			t.Errorf("Expected HTTP 403 Forbidden for customer without pos permission, got %v", resp.StatusCode)
+		}
+	})
+
+	t.Run("PATCH /pos/transactions/:id/change-payment - Successful Switch to CASH", func(t *testing.T) {
+		var txId int64
+		err := dbConn.QueryRow(`
+			INSERT INTO th_user_checkouts (user_id, table_id, order_for, order_type, payment_method, payment_status, total_price, is_cashier)
+			VALUES (1, 1, 'Pending QRIS Customer', 'DINE_IN', 'MIDTRANS', 'PENDING', 50000.00, true)
+			RETURNING id
+		`).Scan(&txId)
+		if err != nil {
+			t.Fatalf("Failed to insert pending checkout for test: %v", err)
+		}
+
+		_, err = dbConn.Exec(`
+			INSERT INTO td_user_checkouts (ref_id, menu_id, qty, price, total_price, created_by)
+			VALUES ($1, 10, 2, 25000.00, 50000.00, 1)
+		`, txId)
+		if err != nil {
+			t.Fatalf("Failed to insert checkout item: %v", err)
+		}
+
+		body := []byte(`{
+			"paymentMethod": "CASH",
+			"cashAmount": 100000.00,
+			"cashChange": 50000.00
+		}`)
+		url := fmt.Sprintf("/api/1.0/pos/transactions/%d/change-payment", txId)
+		resp, err := ExecuteTestRequest(app, "PATCH", url, body, adminToken)
+		if err != nil {
+			t.Fatalf("Request failed: %v", err)
+		}
+		if resp.StatusCode != 200 {
+			respBody, _ := io.ReadAll(resp.Body)
+			t.Fatalf("Expected HTTP 200 OK, got %v with body %s", resp.StatusCode, string(respBody))
+		}
+
+		var updatedMethod, updatedStatus string
+		var updatedCash, updatedChange float64
+		_ = dbConn.QueryRow(`
+			SELECT payment_method, payment_status, cash_amount, cash_change 
+			FROM th_user_checkouts WHERE id = $1
+		`, txId).Scan(&updatedMethod, &updatedStatus, &updatedCash, &updatedChange)
+
+		if updatedMethod != "CASH" {
+			t.Errorf("Expected DB payment_method 'CASH', got '%s'", updatedMethod)
+		}
+		if updatedStatus != "PAID" {
+			t.Errorf("Expected DB payment_status 'PAID', got '%s'", updatedStatus)
+		}
+		if updatedCash != 100000.00 {
+			t.Errorf("Expected cash_amount 100000.00, got %v", updatedCash)
+		}
+		if updatedChange != 50000.00 {
+			t.Errorf("Expected cash_change 50000.00, got %v", updatedChange)
+		}
+	})
+
+	t.Run("PATCH /pos/transactions/:id/change-payment - Validation Errors (Insufficient Cash)", func(t *testing.T) {
+		var txId int64
+		err := dbConn.QueryRow(`
+			INSERT INTO th_user_checkouts (user_id, table_id, order_for, order_type, payment_method, payment_status, total_price, is_cashier)
+			VALUES (1, 1, 'Insufficient Cash Test', 'DINE_IN', 'MIDTRANS', 'PENDING', 50000.00, true)
+			RETURNING id
+		`).Scan(&txId)
+		if err != nil {
+			t.Fatalf("Failed to insert pending checkout: %v", err)
+		}
+
+		_, err = dbConn.Exec(`
+			INSERT INTO td_user_checkouts (ref_id, menu_id, qty, price, total_price, created_by)
+			VALUES ($1, 10, 2, 25000.00, 50000.00, 1)
+		`, txId)
+		if err != nil {
+			t.Fatalf("Failed to insert checkout item: %v", err)
+		}
+
+		body := []byte(`{
+			"paymentMethod": "CASH",
+			"cashAmount": 20000.00,
+			"cashChange": 0.0
+		}`)
+		url := fmt.Sprintf("/api/1.0/pos/transactions/%d/change-payment", txId)
+		resp, err := ExecuteTestRequest(app, "PATCH", url, body, adminToken)
+		if err != nil {
+			t.Fatalf("Request failed: %v", err)
+		}
+		if resp.StatusCode != 400 {
+			t.Errorf("Expected HTTP 400 Bad Request for insufficient cash, got %v", resp.StatusCode)
+		}
+	})
+
+	t.Run("PATCH /pos/transactions/:id/change-payment - Successful Switch to WALLET", func(t *testing.T) {
+		var txId int64
+		err := dbConn.QueryRow(`
+			INSERT INTO th_user_checkouts (user_id, table_id, order_for, order_type, payment_method, payment_status, total_price, is_cashier)
+			VALUES (1, 1, 'Walk-in Guest', 'DINE_IN', 'MIDTRANS', 'PENDING', 50000.00, true)
+			RETURNING id
+		`).Scan(&txId)
+		if err != nil {
+			t.Fatalf("Failed to insert pending checkout for wallet test: %v", err)
+		}
+
+		_, err = dbConn.Exec(`
+			INSERT INTO td_user_checkouts (ref_id, menu_id, qty, price, total_price, created_by)
+			VALUES ($1, 10, 2, 25000.00, 50000.00, 1)
+		`, txId)
+		if err != nil {
+			t.Fatalf("Failed to insert checkout item: %v", err)
+		}
+
+		body := []byte(`{
+			"paymentMethod": "WALLET",
+			"walletPaymentCode": "123456"
+		}`)
+		url := fmt.Sprintf("/api/1.0/pos/transactions/%d/change-payment", txId)
+		resp, err := ExecuteTestRequest(app, "PATCH", url, body, adminToken)
+		if err != nil {
+			t.Fatalf("Request failed: %v", err)
+		}
+		if resp.StatusCode != 200 {
+			respBody, _ := io.ReadAll(resp.Body)
+			t.Fatalf("Expected HTTP 200 OK, got %v with body %s", resp.StatusCode, string(respBody))
+		}
+
+		var updatedMethod, updatedStatus, updatedOrderFor string
+		var updatedUserId int64
+		_ = dbConn.QueryRow(`
+			SELECT payment_method, payment_status, user_id, order_for 
+			FROM th_user_checkouts WHERE id = $1
+		`, txId).Scan(&updatedMethod, &updatedStatus, &updatedUserId, &updatedOrderFor)
+
+		if updatedMethod != "WALLET" {
+			t.Errorf("Expected DB payment_method 'WALLET', got '%s'", updatedMethod)
+		}
+		if updatedStatus != "PAID" {
+			t.Errorf("Expected DB payment_status 'PAID', got '%s'", updatedStatus)
+		}
+		if updatedUserId != 100 {
+			t.Errorf("Expected DB user_id 100, got %v", updatedUserId)
+		}
+		if updatedOrderFor != "Test User" {
+			t.Errorf("Expected DB order_for 'Test User', got '%s'", updatedOrderFor)
+		}
+	})
+
+	t.Run("PATCH /pos/transactions/:id/change-payment - Disallowed Payment Method (MIDTRANS)", func(t *testing.T) {
+		body := []byte(`{
+			"paymentMethod": "MIDTRANS"
+		}`)
+		resp, err := ExecuteTestRequest(app, "PATCH", "/api/1.0/pos/transactions/1/change-payment", body, adminToken)
+		if err != nil {
+			t.Fatalf("Request failed: %v", err)
+		}
+		if resp.StatusCode != 400 {
+			t.Errorf("Expected HTTP 400 Bad Request when switching to MIDTRANS, got %v", resp.StatusCode)
 		}
 	})
 }

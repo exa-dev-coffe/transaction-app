@@ -24,6 +24,7 @@ type PromotionUsageLog struct {
 type Repository interface {
 	// TODO: define repository methods
 	InsertThTransaction(tx *sqlx.Tx, transaction CreateTransactionRequest, voucherId *int64, discountAmount float64) (int, error)
+	InsertThPosTransaction(tx *sqlx.Tx, transaction CreatePosTransactionRequest, voucherId *int64, discountAmount float64, paymentStatus string) (int, error)
 	InsertTdTransaction(tx *sqlx.Tx, transactionId int, createdBy int64, data Data) error
 	InsertTdTransactionBatch(tx *sqlx.Tx, transactionId int, createdBy int64, datas []Data) error
 	GetListTransactionsPagination(params common.ParamsListRequest, startDate string, endDate string) (*response.Pagination[[]TransactionResponse], error)
@@ -32,6 +33,10 @@ type Repository interface {
 	GetListTransactionsByUserId(params common.ParamsListRequest, userId int64) (*response.Pagination[[]TransactionResponse], error)
 	GetOneTransactionByUserId(id int, userId int64) (*TransactionResponse, error)
 	UpdateOrderStatus(tx *sqlx.Tx, id int, updatedBy int64) error
+	UpdatePaymentStatus(tx *sqlx.Tx, id int, status string) error
+	UpdatePosPaymentMethod(tx *sqlx.Tx, id int, paymentMethod string, paymentStatus string, cashAmount float64, cashChange float64) error
+	UpdatePosWalletCustomer(tx *sqlx.Tx, id int, userId int64, orderFor string) error
+	UpdatePosQrisData(tx *sqlx.Tx, id int, qrString string, qrUrl string) error
 	SetRatingMenu(tx *sqlx.Tx, id int, rating int, updatedBy int64) (int, error)
 	SummaryReportTransactions(startDate string, endDate string) (*SummaryReportData, error)
 	LogPromotionUsage(tx *sqlx.Tx, transactionId int64, promotionId int64, menuId int64, userId int64, qty int, discountAmount float64) error
@@ -48,7 +53,8 @@ func NewTransactionRepository(db *sqlx.DB) Repository {
 
 func (r *transactionRepository) InsertThTransaction(tx *sqlx.Tx, transaction CreateTransactionRequest, voucherId *int64, discountAmount float64) (int, error) {
 	var id int
-	query := `INSERT INTO th_user_checkouts (user_id, table_id, order_for, total_price, created_by, voucher_id, discount_amount) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`
+	query := `INSERT INTO th_user_checkouts (user_id, table_id, order_for, total_price, created_by, voucher_id, discount_amount, order_type, payment_method, payment_status, is_cashier) 
+	          VALUES ($1, $2, $3, $4, $5, $6, $7, 'DINE_IN', 'WALLET', 'PAID', FALSE) RETURNING id`
 
 	err := tx.QueryRow(query, transaction.CreatedBy, transaction.TableId, transaction.OrderFor, transaction.Total, transaction.CreatedBy, voucherId, discountAmount).Scan(&id)
 	if err != nil {
@@ -56,6 +62,84 @@ func (r *transactionRepository) InsertThTransaction(tx *sqlx.Tx, transaction Cre
 		return 0, response.InternalServerError("Failed to insert transaction", nil)
 	}
 	return id, nil
+}
+
+func (r *transactionRepository) InsertThPosTransaction(tx *sqlx.Tx, transaction CreatePosTransactionRequest, voucherId *int64, discountAmount float64, paymentStatus string) (int, error) {
+	var id int
+	query := `INSERT INTO th_user_checkouts (user_id, table_id, order_for, total_price, created_by, voucher_id, discount_amount, order_type, payment_method, payment_status, cash_amount, cash_change, is_cashier) 
+	          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, TRUE) RETURNING id`
+
+	var tableId *int64 = nil
+	if transaction.TableId != nil && *transaction.TableId > 0 {
+		tableId = transaction.TableId
+	}
+
+	err := tx.QueryRow(query, transaction.CreatedBy, tableId, transaction.OrderFor, transaction.Total, transaction.CreatedBy, voucherId, discountAmount, transaction.OrderType, transaction.PaymentMethod, paymentStatus, transaction.CashAmount, transaction.CashChange).Scan(&id)
+	if err != nil {
+		slog.Error("Failed to insert POS transaction", "error", err)
+		return 0, response.InternalServerError("Failed to insert POS transaction", nil)
+	}
+	return id, nil
+}
+
+func (r *transactionRepository) UpdatePaymentStatus(tx *sqlx.Tx, id int, status string) error {
+	query := `UPDATE th_user_checkouts SET payment_status = $1, updated_at = NOW() WHERE id = $2`
+	var err error
+	if tx != nil {
+		_, err = tx.Exec(query, status, id)
+	} else {
+		_, err = r.db.Exec(query, status, id)
+	}
+	if err != nil {
+		slog.Error("Failed to update payment status", "error", err)
+		return response.InternalServerError("Failed to update payment status", nil)
+	}
+	return nil
+}
+
+func (r *transactionRepository) UpdatePosPaymentMethod(tx *sqlx.Tx, id int, paymentMethod string, paymentStatus string, cashAmount float64, cashChange float64) error {
+	query := `UPDATE th_user_checkouts SET payment_method = $1, payment_status = $2, cash_amount = $3, cash_change = $4, updated_at = NOW() WHERE id = $5`
+	var err error
+	if tx != nil {
+		_, err = tx.Exec(query, paymentMethod, paymentStatus, cashAmount, cashChange, id)
+	} else {
+		_, err = r.db.Exec(query, paymentMethod, paymentStatus, cashAmount, cashChange, id)
+	}
+	if err != nil {
+		slog.Error("Failed to update POS payment method", "error", err)
+		return response.InternalServerError("Failed to update POS payment method", nil)
+	}
+	return nil
+}
+
+func (r *transactionRepository) UpdatePosWalletCustomer(tx *sqlx.Tx, id int, userId int64, orderFor string) error {
+	query := `UPDATE th_user_checkouts SET user_id = $1, created_by = $1, order_for = $2, updated_at = NOW() WHERE id = $3`
+	var err error
+	if tx != nil {
+		_, err = tx.Exec(query, userId, orderFor, id)
+	} else {
+		_, err = r.db.Exec(query, userId, orderFor, id)
+	}
+	if err != nil {
+		slog.Error("Failed to update POS wallet customer info", "error", err)
+		return response.InternalServerError("Failed to update POS wallet customer info", nil)
+	}
+	return nil
+}
+
+func (r *transactionRepository) UpdatePosQrisData(tx *sqlx.Tx, id int, qrString string, qrUrl string) error {
+	query := `UPDATE th_user_checkouts SET qr_string = $1, qr_url = $2, updated_at = NOW() WHERE id = $3`
+	var err error
+	if tx != nil {
+		_, err = tx.Exec(query, qrString, qrUrl, id)
+	} else {
+		_, err = r.db.Exec(query, qrString, qrUrl, id)
+	}
+	if err != nil {
+		slog.Error("Failed to update POS QRIS data", "error", err)
+		return response.InternalServerError("Failed to update POS QRIS data", nil)
+	}
+	return nil
 }
 
 func (r *transactionRepository) InsertTdTransaction(tx *sqlx.Tx, transactionId int, createdBy int64, data Data) error {

@@ -72,10 +72,65 @@ type CreateTransactionRequest struct {
 	CreatedBy   int64   `json:"createdBy"`
 }
 
+type CreatePosTransactionRequest struct {
+	TableId           *int64  `json:"tableId"`
+	OrderType         string  `json:"orderType" validate:"required,oneof=DINE_IN TAKEAWAY"`
+	PaymentMethod     string  `json:"paymentMethod" validate:"required,oneof=CASH MIDTRANS WALLET"`
+	OrderFor          string  `json:"orderFor" validate:"required"`
+	CashAmount        float64 `json:"cashAmount"`
+	CashChange        float64 `json:"cashChange"`
+	WalletPaymentCode string  `json:"walletPaymentCode"`
+	VoucherCode       string  `json:"voucherCode"`
+	Datas             []Data  `json:"datas" validate:"required,dive,required"`
+	Total             float64 `json:"total"`
+	CreatedBy         int64   `json:"createdBy"`
+}
+
+type ChangePosPaymentMethodRequest struct {
+	PaymentMethod     string  `json:"paymentMethod" validate:"required,oneof=CASH WALLET"`
+	CashAmount        float64 `json:"cashAmount"`
+	CashChange        float64 `json:"cashChange"`
+	WalletPaymentCode string  `json:"walletPaymentCode"`
+	UpdatedBy         int64   `json:"updatedBy"`
+}
+
 type PaymentRequest struct {
 	UserId int64   `json:"userId"`
 	Amount float64 `json:"amount" `
 	Pin    string  `json:"pin"`
+}
+
+type PosWalletPayRequest struct {
+	PaymentCode string  `json:"paymentCode"`
+	Amount      float64 `json:"amount"`
+	OrderId     int64   `json:"orderId"`
+}
+
+type PosWalletPayResponse struct {
+	Success          bool    `json:"success"`
+	UserId           int64   `json:"userId"`
+	CustomerName     string  `json:"customerName"`
+	CustomerEmail    string  `json:"customerEmail"`
+	AmountPaid       float64 `json:"amountPaid"`
+	RemainingBalance float64 `json:"remainingBalance"`
+	Message          string  `json:"message"`
+}
+
+type PosQrisChargeRequest struct {
+	OrderId       string  `json:"orderId"`
+	GrossAmount   float64 `json:"grossAmount"`
+	CustomerName  string  `json:"customerName"`
+	CustomerEmail string  `json:"customerEmail"`
+}
+
+type PosQrisChargeResponse struct {
+	OrderId           string  `json:"orderId"`
+	GrossAmount       float64 `json:"grossAmount"`
+	QrString          string  `json:"qrString"`
+	QrUrl             string  `json:"qrUrl"`
+	ExpiryTime        string  `json:"expiryTime"`
+	TransactionStatus string  `json:"transactionStatus"`
+	TransactionId     string  `json:"transactionId"`
 }
 
 type TransactionResponse struct {
@@ -89,9 +144,17 @@ type TransactionResponse struct {
 	CreatedAt      string                  `json:"createdAt" db:"created_at"`
 	UpdatedAt      string                  `json:"updatedAt" db:"updated_at"`
 	TableId        int64                   `json:"tableId" db:"table_id"`
+	OrderType      string                  `json:"orderType" db:"order_type"`
+	PaymentMethod  string                  `json:"paymentMethod" db:"payment_method"`
+	PaymentStatus  string                  `json:"paymentStatus" db:"payment_status"`
+	CashAmount     float64                 `json:"cashAmount" db:"cash_amount"`
+	CashChange     float64                 `json:"cashChange" db:"cash_change"`
+	IsCashier      bool                    `json:"isCashier" db:"is_cashier"`
 	VoucherId      *int64                  `json:"voucherId" db:"voucher_id"`
 	VoucherCode    string                  `json:"voucherCode" db:"voucher_code"`
 	DiscountAmount float64                 `json:"discountAmount" db:"discount_amount"`
+	QrString       string                  `json:"qrString,omitempty" db:"qr_string"`
+	QrUrl          string                  `json:"qrUrl,omitempty" db:"qr_url"`
 	Details        JSONBTransactionDetails `json:"details" db:"details"`
 }
 
@@ -168,4 +231,11 @@ type SummaryReportData struct {
 	StatusBreakdown []OrderStatusBreakdown `json:"statusBreakdown"`
 	PeakHours       []PeakHourBreakdown    `json:"peakHours"`
 	TopMenus        []TopMenu              `json:"topMenus"`
+}
+
+type PosQrisSettledEvent struct {
+	OrderRef      string  `json:"orderRef"`
+	PaymentStatus string  `json:"paymentStatus"`
+	GrossAmount   float64 `json:"grossAmount"`
+	Timestamp     string  `json:"timestamp"`
 }

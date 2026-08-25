@@ -18,6 +18,7 @@ import (
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/requestid"
 	"github.com/jmoiron/sqlx"
+	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 func main() {
@@ -86,11 +87,22 @@ func initiator() {
 	transactionService := transaction.NewTransactionService(transactionRepo, voucherService, db.DB)
 	transaction.NewHandler(fiberApp, transactionService, db.DB)
 
+	ch, err := lib.GetChannel()
+	if err != nil {
+		slog.Error("Failed to connect to RabbitMQ for listener", "error", err)
+	} else {
+		defer func(ch *amqp.Channel) {
+			_ = ch.Close()
+		}(ch)
+		// Initialize RabbitMQ consumers/listeners
+		transaction.NewListener(ch, transactionService, db.DB)
+	}
+
 	fiberApp.All("*", func(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusNotFound).JSON(response.NotFound("Route not found", nil))
 	})
 
-	err := fiberApp.Listen(config.Config.Port)
+	err = fiberApp.Listen(config.Config.Port)
 	if err != nil {
 		slog.Error("Failed to start server", "error", err)
 		os.Exit(1)
