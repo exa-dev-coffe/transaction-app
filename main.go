@@ -2,7 +2,8 @@ package main
 
 import (
 	"context"
-	"log"
+	"log/slog"
+	"os"
 
 	"eka-dev.cloud/transaction-service/config"
 	"eka-dev.cloud/transaction-service/db"
@@ -11,11 +12,13 @@ import (
 	_ "eka-dev.cloud/transaction-service/lib"
 	"eka-dev.cloud/transaction-service/middleware"
 	"eka-dev.cloud/transaction-service/modules/transaction"
+	"eka-dev.cloud/transaction-service/modules/voucher"
 	"eka-dev.cloud/transaction-service/utils/response"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/requestid"
 	"github.com/jmoiron/sqlx"
+	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 func main() {
@@ -32,16 +35,23 @@ func main() {
 	defer func(db *sqlx.DB) {
 		err := db.Close()
 		if err != nil {
-			log.Println("Error closing database connection:", err)
+			slog.Error("Error closing database connection", "error", err)
 		}
 	}(db.DB)
 
 }
 
 func initiator() {
+	// Initialize Asynq Client
+	lib.InitAsynq()
+	// Initialize Redis Client for token and permission caching
+	lib.InitRedis()
+
 	// Initialize the fiber app
 	fiberApp := fiber.New(fiber.Config{
-		ErrorHandler: middleware.ErrorHandler,
+		ErrorHandler:    middleware.ErrorHandler,
+		ReadBufferSize:  16 * 1024,
+		WriteBufferSize: 16 * 1024,
 	})
 
 	fiberApp.Use(requestid.New())
@@ -51,12 +61,12 @@ func initiator() {
 	fiberApp.Get("/health", func(c *fiber.Ctx) error {
 		err := db.DB.Ping()
 		if err != nil {
-			log.Println("Database ping failed:", err)
+			slog.Error("Database ping failed", "error", err)
 			return c.Status(fiber.StatusInternalServerError).JSON(response.InternalServerError("Database connection error", nil))
 		}
 		err = lib.HealthCheck()
 		if err != nil {
-			log.Println("RabbitMQ connection failed:", err)
+			slog.Error("RabbitMQ connection failed", "error", err)
 			return c.Status(fiber.StatusInternalServerError).JSON(response.InternalServerError("RabbitMQ connection error", nil))
 		}
 		return c.Status(fiber.StatusOK).JSON(response.Success("OK", nil))
@@ -68,17 +78,33 @@ func initiator() {
 		AllowMethods: "GET, POST, PUT, DELETE, OPTIONS, PATCH",
 	}))
 
-	// Initialize routes
-	// Menus
-	transaction.NewHandler(fiberApp, db.DB)
+	// Initialize modules
+	voucherRepo := voucher.NewVoucherRepository(db.DB)
+	voucherService := voucher.NewVoucherService(voucherRepo, db.DB)
+	voucher.NewHandler(fiberApp, voucherService)
+
+	transactionRepo := transaction.NewTransactionRepository(db.DB)
+	transactionService := transaction.NewTransactionService(transactionRepo, voucherService, db.DB)
+	transaction.NewHandler(fiberApp, transactionService, db.DB)
+
+	ch, err := lib.GetChannel()
+	if err != nil {
+		slog.Error("Failed to connect to RabbitMQ for listener", "error", err)
+	} else {
+		defer func(ch *amqp.Channel) {
+			_ = ch.Close()
+		}(ch)
+		// Initialize RabbitMQ consumers/listeners
+		transaction.NewListener(ch, transactionService, db.DB)
+	}
 
 	fiberApp.All("*", func(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusNotFound).JSON(response.NotFound("Route not found", nil))
 	})
 
-	err := fiberApp.Listen(config.Config.Port)
+	err = fiberApp.Listen(config.Config.Port)
 	if err != nil {
-		log.Fatalln("Failed to start server:", err)
-		return
+		slog.Error("Failed to start server", "error", err)
+		os.Exit(1)
 	}
 }

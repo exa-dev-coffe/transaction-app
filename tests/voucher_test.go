@@ -1,0 +1,576 @@
+package tests
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"sync"
+	"testing"
+)
+
+type validateVoucherResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+	Data    struct {
+		Valid          bool    `json:"valid"`
+		DiscountAmount float64 `json:"discountAmount"`
+		FinalTotal     float64 `json:"finalTotal"`
+		Message        string  `json:"message"`
+	} `json:"data"`
+}
+
+type createVoucherResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+	Data    struct {
+		ID int64 `json:"id"`
+	} `json:"data"`
+}
+
+type voucherItem struct {
+	ID            int64   `json:"id"`
+	Code          string  `json:"code"`
+	DiscountType  string  `json:"discountType"`
+	DiscountValue float64 `json:"discountValue"`
+	MaxDiscount   float64 `json:"maxDiscount"`
+	MinPurchase   float64 `json:"minPurchase"`
+	Quota         int     `json:"quota"`
+	IsActive      bool    `json:"isActive"`
+}
+
+type getListVouchersResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+	Data    struct {
+		Data        []voucherItem `json:"data"`
+		TotalData   int           `json:"totalData"`
+		TotalPages  int           `json:"totalPages"`
+		CurrentPage int           `json:"currentPage"`
+		PageSize    int           `json:"pageSize"`
+		LastPage    bool          `json:"lastPage"`
+	} `json:"data"`
+}
+
+type genericResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+}
+
+func TestVoucherSuite(t *testing.T) {
+	dbConn, teardown := SetupTestPostgresTransaction(t)
+	defer teardown()
+
+	mockServer := SetupMockExternalServices()
+	defer mockServer.Close()
+
+	app := SetupTestApp(dbConn)
+	customerToken := GenerateTestToken(100, "user@test.com", "customer")
+	adminToken := GenerateTestToken(1, "admin@test.com", "admin")
+
+	// Seed Real Vouchers into PostgreSQL Test Database
+	_, err := dbConn.Exec(`
+		INSERT INTO tm_vouchers (id, code, discount_type, discount_value, max_discount, min_purchase, quota, is_active, is_public, expired_at)
+		VALUES 
+			(10, 'DISCOUNT10', 'PERCENTAGE', 10.00, 15000.00, 50000.00, 10, true, true, NOW() + INTERVAL '1 day'),
+			(11, 'HEMAT20K', 'FIXED', 20000.00, 0.00, 50000.00, 5, true, true, NOW() + INTERVAL '1 day'),
+			(12, 'MIN100K', 'FIXED', 10000.00, 0.00, 100000.00, 5, true, true, NOW() + INTERVAL '1 day'),
+			(13, 'SOLD_OUT', 'FIXED', 10000.00, 0.00, 10000.00, 0, true, true, NOW() + INTERVAL '1 day'),
+			(14, 'ONCE_ONLY', 'FIXED', 10000.00, 0.00, 10000.00, 10, true, true, NOW() + INTERVAL '1 day'),
+			(15, 'EXPIRED_VOUCHER', 'FIXED', 10000.00, 0.00, 10000.00, 10, false, true, NOW() - INTERVAL '1 day'),
+			(99, 'SECRET_VIP_CODE', 'FIXED', 50000.00, 0.00, 100000.00, 10, true, false, NOW() + INTERVAL '1 day')
+		ON CONFLICT (id) DO NOTHING;
+
+		INSERT INTO tr_voucher_usages (user_id, voucher_id, checkout_id, discount_amount)
+		VALUES (100, 14, 999, 10000.00)
+		ON CONFLICT DO NOTHING;
+	`)
+	if err != nil {
+		t.Fatalf("Failed to seed real test vouchers into PostgreSQL: %v", err)
+	}
+
+	t.Run("POST /transactions/validate-voucher - 10% Percentage Discount", func(t *testing.T) {
+		body := []byte(`{"code":"DISCOUNT10","orderTotal":100000}`)
+		resp, err := ExecuteTestRequest(app, "POST", "/api/1.0/transactions/validate-voucher", body, customerToken)
+		if err != nil {
+			t.Fatalf("Request failed: %v", err)
+		}
+		if resp.StatusCode != 200 {
+			t.Fatalf("Expected HTTP 200 OK, got %v", resp.StatusCode)
+		}
+
+		respBody, _ := io.ReadAll(resp.Body)
+		var res validateVoucherResponse
+		if err := json.Unmarshal(respBody, &res); err != nil {
+			t.Fatalf("Failed to parse response JSON: %v", err)
+		}
+
+		if !res.Success {
+			t.Errorf("Expected success to be true, got false")
+		}
+		if res.Message != "Success" {
+			t.Errorf("Expected message 'Success', got '%s'", res.Message)
+		}
+		if !res.Data.Valid {
+			t.Fatalf("Expected voucher DISCOUNT10 to be valid")
+		}
+		if res.Data.DiscountAmount != 10000 {
+			t.Errorf("Expected discountAmount 10000, got %f", res.Data.DiscountAmount)
+		}
+		if res.Data.FinalTotal != 90000 {
+			t.Errorf("Expected finalTotal 90000, got %f", res.Data.FinalTotal)
+		}
+		if res.Data.Message != "Voucher applied successfully" {
+			t.Errorf("Expected data message 'Voucher applied successfully', got '%s'", res.Data.Message)
+		}
+	})
+
+	t.Run("POST /transactions/validate-voucher - Fixed 20K Discount", func(t *testing.T) {
+		body := []byte(`{"code":"HEMAT20K","orderTotal":75000}`)
+		resp, err := ExecuteTestRequest(app, "POST", "/api/1.0/transactions/validate-voucher", body, customerToken)
+		if err != nil {
+			t.Fatalf("Request failed: %v", err)
+		}
+		if resp.StatusCode != 200 {
+			t.Fatalf("Expected HTTP 200 OK, got %v", resp.StatusCode)
+		}
+
+		respBody, _ := io.ReadAll(resp.Body)
+		var res validateVoucherResponse
+		if err := json.Unmarshal(respBody, &res); err != nil {
+			t.Fatalf("Failed to parse response JSON: %v", err)
+		}
+
+		if !res.Success {
+			t.Errorf("Expected success to be true, got false")
+		}
+		if res.Message != "Success" {
+			t.Errorf("Expected message 'Success', got '%s'", res.Message)
+		}
+		if !res.Data.Valid {
+			t.Fatalf("Expected voucher HEMAT20K to be valid")
+		}
+		if res.Data.DiscountAmount != 20000 {
+			t.Errorf("Expected discountAmount 20000, got %f", res.Data.DiscountAmount)
+		}
+		if res.Data.FinalTotal != 55000 {
+			t.Errorf("Expected finalTotal 55000, got %f", res.Data.FinalTotal)
+		}
+		if res.Data.Message != "Voucher applied successfully" {
+			t.Errorf("Expected data message 'Voucher applied successfully', got '%s'", res.Data.Message)
+		}
+	})
+
+	t.Run("POST /transactions/validate-voucher - Min Purchase Not Met", func(t *testing.T) {
+		body := []byte(`{"code":"MIN100K","orderTotal":50000}`)
+		resp, err := ExecuteTestRequest(app, "POST", "/api/1.0/transactions/validate-voucher", body, customerToken)
+		if err != nil {
+			t.Fatalf("Request failed: %v", err)
+		}
+		if resp.StatusCode != 200 {
+			t.Fatalf("Expected HTTP 200 OK, got %v", resp.StatusCode)
+		}
+
+		respBody, _ := io.ReadAll(resp.Body)
+		var res validateVoucherResponse
+		if err := json.Unmarshal(respBody, &res); err != nil {
+			t.Fatalf("Failed to parse response JSON: %v", err)
+		}
+
+		if !res.Success {
+			t.Errorf("Expected success to be true, got false")
+		}
+		if res.Data.Valid {
+			t.Errorf("Expected MIN100K to be invalid due to min purchase requirement")
+		}
+		if res.Data.Message == "" {
+			t.Errorf("Expected data.message to describe why voucher is invalid, got empty string")
+		}
+	})
+
+	t.Run("POST /transactions/validate-voucher - Quota Reached", func(t *testing.T) {
+		body := []byte(`{"code":"SOLD_OUT","orderTotal":50000}`)
+		resp, err := ExecuteTestRequest(app, "POST", "/api/1.0/transactions/validate-voucher", body, customerToken)
+		if err != nil {
+			t.Fatalf("Request failed: %v", err)
+		}
+		if resp.StatusCode != 200 {
+			t.Fatalf("Expected HTTP 200 OK, got %v", resp.StatusCode)
+		}
+
+		respBody, _ := io.ReadAll(resp.Body)
+		var res validateVoucherResponse
+		if err := json.Unmarshal(respBody, &res); err != nil {
+			t.Fatalf("Failed to parse response JSON: %v", err)
+		}
+
+		if !res.Success {
+			t.Errorf("Expected success to be true, got false")
+		}
+		if res.Data.Valid {
+			t.Errorf("Expected SOLD_OUT to be invalid due to 0 quota")
+		}
+		if res.Data.Message != "Voucher quota has been reached" {
+			t.Errorf("Expected message 'Voucher quota has been reached', got '%s'", res.Data.Message)
+		}
+	})
+
+	t.Run("POST /transactions/validate-voucher - Already Used", func(t *testing.T) {
+		body := []byte(`{"code":"ONCE_ONLY","orderTotal":50000}`)
+		resp, err := ExecuteTestRequest(app, "POST", "/api/1.0/transactions/validate-voucher", body, customerToken)
+		if err != nil {
+			t.Fatalf("Request failed: %v", err)
+		}
+		if resp.StatusCode != 200 {
+			t.Fatalf("Expected HTTP 200 OK, got %v", resp.StatusCode)
+		}
+
+		respBody, _ := io.ReadAll(resp.Body)
+		var res validateVoucherResponse
+		if err := json.Unmarshal(respBody, &res); err != nil {
+			t.Fatalf("Failed to parse response JSON: %v", err)
+		}
+
+		if !res.Success {
+			t.Errorf("Expected success to be true, got false")
+		}
+		if res.Data.Valid {
+			t.Errorf("Expected ONCE_ONLY to be invalid because user 100 already used it")
+		}
+		if res.Data.Message != "You have already used this voucher" {
+			t.Errorf("Expected message 'You have already used this voucher', got '%s'", res.Data.Message)
+		}
+	})
+
+	t.Run("POST /vouchers - Admin Create Voucher", func(t *testing.T) {
+		body := []byte(`{
+			"code": "NEWPROMO30",
+			"discountType": "PERCENTAGE",
+			"discountValue": 30.0,
+			"maxDiscount": 20000.0,
+			"minPurchase": 50000.0,
+			"quota": 20,
+			"expiredAt": "2030-12-31 23:59:59"
+		}`)
+		resp, err := ExecuteTestRequest(app, "POST", "/api/1.0/vouchers", body, adminToken)
+		if err != nil {
+			t.Fatalf("Request failed: %v", err)
+		}
+		if resp.StatusCode != 201 {
+			t.Fatalf("Expected HTTP 201 Created, got %v", resp.StatusCode)
+		}
+
+		respBody, _ := io.ReadAll(resp.Body)
+		var res createVoucherResponse
+		if err := json.Unmarshal(respBody, &res); err != nil {
+			t.Fatalf("Failed to parse response JSON: %v", err)
+		}
+
+		if !res.Success {
+			t.Errorf("Expected success to be true, got false")
+		}
+		if res.Message != "Voucher created successfully" {
+			t.Errorf("Expected message 'Voucher created successfully', got '%s'", res.Message)
+		}
+		if res.Data.ID <= 0 {
+			t.Errorf("Expected valid voucher ID in data, got %d", res.Data.ID)
+		}
+
+		// Verify record created in PostgreSQL DB across ALL inserted columns
+		var (
+			code          string
+			discountType  string
+			discountValue float64
+			maxDiscount   float64
+			minPurchase   float64
+			quota         int
+			isActive      bool
+		)
+		err = dbConn.QueryRow(`
+			SELECT code, discount_type, discount_value, max_discount, min_purchase, quota, is_active 
+			FROM tm_vouchers WHERE id = $1
+		`, res.Data.ID).Scan(&code, &discountType, &discountValue, &maxDiscount, &minPurchase, &quota, &isActive)
+		if err != nil {
+			t.Fatalf("Failed to fetch created voucher ID %d from DB: %v", res.Data.ID, err)
+		}
+		if code != "NEWPROMO30" {
+			t.Errorf("Expected code 'NEWPROMO30', got '%s'", code)
+		}
+		if discountType != "PERCENTAGE" {
+			t.Errorf("Expected discount_type 'PERCENTAGE', got '%s'", discountType)
+		}
+		if discountValue != 30.0 {
+			t.Errorf("Expected discount_value 30.0, got %f", discountValue)
+		}
+		if maxDiscount != 20000.0 {
+			t.Errorf("Expected max_discount 20000.0, got %f", maxDiscount)
+		}
+		if minPurchase != 50000.0 {
+			t.Errorf("Expected min_purchase 50000.0, got %f", minPurchase)
+		}
+		if quota != 20 {
+			t.Errorf("Expected quota 20, got %d", quota)
+		}
+		if !isActive {
+			t.Errorf("Expected is_active true, got false")
+		}
+	})
+
+	t.Run("GET /vouchers - Admin Get List Vouchers", func(t *testing.T) {
+		resp, err := ExecuteTestRequest(app, "GET", "/api/1.0/vouchers?page=1&size=10", nil, adminToken)
+		if err != nil {
+			t.Fatalf("Request failed: %v", err)
+		}
+		if resp.StatusCode != 200 {
+			t.Fatalf("Expected HTTP 200 OK, got %v", resp.StatusCode)
+		}
+
+		respBody, _ := io.ReadAll(resp.Body)
+		var res getListVouchersResponse
+		if err := json.Unmarshal(respBody, &res); err != nil {
+			t.Fatalf("Failed to parse response JSON: %v", err)
+		}
+
+		if !res.Success {
+			t.Errorf("Expected success to be true, got false")
+		}
+		if res.Message != "Success" {
+			t.Errorf("Expected message 'Success', got '%s'", res.Message)
+		}
+
+		// Assert pagination schema details
+		if res.Data.CurrentPage != 1 {
+			t.Errorf("Expected currentPage 1, got %d", res.Data.CurrentPage)
+		}
+		if res.Data.PageSize != 10 {
+			t.Errorf("Expected pageSize 10, got %d", res.Data.PageSize)
+		}
+		if res.Data.TotalData < 5 {
+			t.Errorf("Expected totalData at least 5, got %d", res.Data.TotalData)
+		}
+
+		// Assert array content details
+		if len(res.Data.Data) == 0 {
+			t.Fatalf("Expected voucher list in data.data to be non-empty")
+		}
+
+		// Assert first element schema & data correctness
+		firstVoucher := res.Data.Data[0]
+		if firstVoucher.ID <= 0 {
+			t.Errorf("Expected valid ID for first voucher, got %d", firstVoucher.ID)
+		}
+		if firstVoucher.Code == "" {
+			t.Errorf("Expected non-empty code for first voucher")
+		}
+		if firstVoucher.DiscountType != "PERCENTAGE" && firstVoucher.DiscountType != "FIXED" {
+			t.Errorf("Expected discountType to be PERCENTAGE or FIXED, got '%s'", firstVoucher.DiscountType)
+		}
+	})
+
+	t.Run("GET /vouchers - Customer & Barista Cannot See Private Secret Vouchers", func(t *testing.T) {
+		resp, err := ExecuteTestRequest(app, "GET", "/api/1.0/vouchers?page=1&size=100", nil, customerToken)
+		if err != nil {
+			t.Fatalf("Request failed: %v", err)
+		}
+		if resp.StatusCode != 200 {
+			respBody, _ := io.ReadAll(resp.Body)
+			t.Fatalf("Expected HTTP 200 OK for customer listing vouchers, got %v: %s", resp.StatusCode, string(respBody))
+		}
+
+		respBody, _ := io.ReadAll(resp.Body)
+		var res getListVouchersResponse
+		if err := json.Unmarshal(respBody, &res); err != nil {
+			t.Fatalf("Failed to parse response JSON: %v", err)
+		}
+
+		// Security & Privacy assertion:
+		// 1. SECRET_VIP_CODE (is_public = false) must NOT be returned to non-admin customers!
+		// 2. ONCE_ONLY (voucher ID 14, already used by user 100) must NOT be returned!
+		for _, v := range res.Data.Data {
+			if v.Code == "SECRET_VIP_CODE" {
+				t.Fatalf("SECURITY VIOLATION: Non-admin customer was able to view private secret voucher 'SECRET_VIP_CODE'")
+			}
+			if v.Code == "ONCE_ONLY" {
+				t.Fatalf("PRIVACY VIOLATION: Non-admin customer was able to view already redeemed voucher 'ONCE_ONLY'")
+			}
+		}
+	})
+
+	t.Run("PATCH /vouchers/:id/status - Admin Update Voucher Status", func(t *testing.T) {
+		body := []byte(`{"isActive": false}`)
+		url := fmt.Sprintf("/api/1.0/vouchers/10/status")
+		resp, err := ExecuteTestRequest(app, "PATCH", url, body, adminToken)
+		if err != nil {
+			t.Fatalf("Request failed: %v", err)
+		}
+		if resp.StatusCode != 200 {
+			t.Fatalf("Expected HTTP 200 OK, got %v", resp.StatusCode)
+		}
+
+		respBody, _ := io.ReadAll(resp.Body)
+		var res genericResponse
+		if err := json.Unmarshal(respBody, &res); err != nil {
+			t.Fatalf("Failed to parse response JSON: %v", err)
+		}
+
+		if !res.Success {
+			t.Errorf("Expected success to be true, got false")
+		}
+		if res.Message != "Voucher status updated successfully" {
+			t.Errorf("Expected message 'Voucher status updated successfully', got '%s'", res.Message)
+		}
+
+		var isActive bool
+		_ = dbConn.Get(&isActive, "SELECT is_active FROM tm_vouchers WHERE id = 10")
+		if isActive != false {
+			t.Errorf("Expected voucher 10 is_active to be false in PostgreSQL DB")
+		}
+	})
+
+	t.Run("PATCH /vouchers/:id/status - Admin Update Voucher IsPublic Visibility", func(t *testing.T) {
+		body := []byte(`{"isPublic": false}`)
+		url := fmt.Sprintf("/api/1.0/vouchers/10/status")
+		resp, err := ExecuteTestRequest(app, "PATCH", url, body, adminToken)
+		if err != nil {
+			t.Fatalf("Request failed: %v", err)
+		}
+		if resp.StatusCode != 200 {
+			t.Fatalf("Expected HTTP 200 OK, got %v", resp.StatusCode)
+		}
+
+		var isPublic bool
+		_ = dbConn.Get(&isPublic, "SELECT is_public FROM tm_vouchers WHERE id = 10")
+		if isPublic != false {
+			t.Errorf("Expected voucher 10 is_public to be false in PostgreSQL DB")
+		}
+	})
+
+	t.Run("PATCH /vouchers/:id/status - Cannot Activate Expired Voucher", func(t *testing.T) {
+		body := []byte(`{"isActive": true}`)
+		url := fmt.Sprintf("/api/1.0/vouchers/15/status")
+		resp, err := ExecuteTestRequest(app, "PATCH", url, body, adminToken)
+		if err != nil {
+			t.Fatalf("Request failed: %v", err)
+		}
+		if resp.StatusCode != 400 {
+			t.Fatalf("Expected HTTP 400 Bad Request, got %v", resp.StatusCode)
+		}
+
+		respBody, _ := io.ReadAll(resp.Body)
+		var res genericResponse
+		_ = json.Unmarshal(respBody, &res)
+		if res.Message != "Cannot activate an expired voucher" {
+			t.Errorf("Expected message 'Cannot activate an expired voucher', got '%s'", res.Message)
+		}
+	})
+
+	t.Run("DELETE /vouchers/:id - Admin Delete Voucher", func(t *testing.T) {
+		url := fmt.Sprintf("/api/1.0/vouchers/11")
+		resp, err := ExecuteTestRequest(app, "DELETE", url, nil, adminToken)
+		if err != nil {
+			t.Fatalf("Request failed: %v", err)
+		}
+		if resp.StatusCode != 200 {
+			t.Fatalf("Expected HTTP 200 OK, got %v", resp.StatusCode)
+		}
+
+		respBody, _ := io.ReadAll(resp.Body)
+		var res genericResponse
+		if err := json.Unmarshal(respBody, &res); err != nil {
+			t.Fatalf("Failed to parse response JSON: %v", err)
+		}
+
+		if !res.Success {
+			t.Errorf("Expected success to be true, got false")
+		}
+		if res.Message != "Voucher deleted successfully" {
+			t.Errorf("Expected message 'Voucher deleted successfully', got '%s'", res.Message)
+		}
+
+		var deletedAt *string
+		_ = dbConn.Get(&deletedAt, "SELECT deleted_at FROM tm_vouchers WHERE id = 11")
+		if deletedAt == nil {
+			t.Errorf("Expected voucher 11 deleted_at to be populated in PostgreSQL DB")
+		}
+	})
+
+	t.Run("CONCURRENCY - Two Users Fighting for Last Remaining Voucher (Quota = 1, FOR UPDATE Lock)", func(t *testing.T) {
+		// 1. Seed a voucher with quota = 1
+		_, _ = dbConn.Exec(`DELETE FROM tm_vouchers WHERE code = 'LAST_VOUCHER'`)
+		var voucherId int64
+		err := dbConn.QueryRow(`
+			INSERT INTO tm_vouchers (code, discount_type, discount_value, min_purchase, quota, is_active, expired_at)
+			VALUES ('LAST_VOUCHER', 'FIXED', 5000.00, 20000.00, 1, true, CURRENT_TIMESTAMP + INTERVAL '1 day')
+			RETURNING id
+		`).Scan(&voucherId)
+		if err != nil {
+			t.Fatalf("Failed to seed race voucher: %v", err)
+		}
+
+		user1Token := GenerateTestToken(101, "user1@test.com", "customer")
+		user2Token := GenerateTestToken(102, "user2@test.com", "customer")
+
+		body := []byte(`{
+			"tableId": 1,
+			"orderFor": "Race Checkout",
+			"pin": "123456",
+			"voucherCode": "LAST_VOUCHER",
+			"datas": [{"menuId": 10, "qty": 2, "price": 25000.00, "total": 50000.00}],
+			"total": 50000.00
+		}`)
+
+		var wg sync.WaitGroup
+		wg.Add(2)
+
+		var status1, status2 int
+		startSignal := make(chan struct{})
+
+		go func() {
+			defer wg.Done()
+			<-startSignal
+			resp, _ := ExecuteTestRequest(app, "POST", "/api/1.0/checkout", body, user1Token)
+			if resp != nil {
+				status1 = resp.StatusCode
+			}
+		}()
+
+		go func() {
+			defer wg.Done()
+			<-startSignal
+			resp, _ := ExecuteTestRequest(app, "POST", "/api/1.0/checkout", body, user2Token)
+			if resp != nil {
+				status2 = resp.StatusCode
+			}
+		}()
+
+		// Trigger both requests at the exact same moment
+		close(startSignal)
+		wg.Wait()
+
+		// Exactly one must succeed (201) and the other must fail (400)
+		successCount := 0
+		if status1 == 201 {
+			successCount++
+		}
+		if status2 == 201 {
+			successCount++
+		}
+
+		if successCount != 1 {
+			t.Errorf("Expected exactly 1 checkout to succeed with quota=1, but user1 got %d and user2 got %d", status1, status2)
+		}
+
+		// Verify database state: Quota must be 0 (never negative)
+		var finalQuota int
+		_ = dbConn.Get(&finalQuota, "SELECT quota FROM tm_vouchers WHERE id = $1", voucherId)
+		if finalQuota != 0 {
+			t.Errorf("Expected final quota to be 0, got %d", finalQuota)
+		}
+
+		// Verify voucher usage record count = exactly 1
+		var usageCount int
+		_ = dbConn.Get(&usageCount, "SELECT count(*) FROM tr_voucher_usages WHERE voucher_id = $1", voucherId)
+		if usageCount != 1 {
+			t.Errorf("Expected exactly 1 voucher usage in tr_voucher_usages, got %d", usageCount)
+		}
+	})
+}

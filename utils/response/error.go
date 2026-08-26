@@ -5,10 +5,10 @@ import (
 	"time"
 )
 
-// AppError adalah custom error untuk aplikasi
+// AppError is custom error for application
 type AppError struct {
 	Code      int
-	Message   string      `json:"message"` // Pesan untuk client
+	Message   string      `json:"message"` // Client message
 	Data      interface{} `json:"data"`
 	TimeStamp time.Time   `json:"timestamp"`
 }
@@ -27,7 +27,7 @@ func NewAppError(code int, message string, data interface{}) *AppError {
 	}
 }
 
-// Shortcut untuk error umum
+// Shortcuts for common errors
 func NotFound(message string, data interface{}) *AppError {
 	if message == "" {
 		return NewAppError(http.StatusNotFound, "Resource not found", data)

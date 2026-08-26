@@ -2,11 +2,11 @@ package lib
 
 import (
 	"context"
+	"log/slog"
 	"mime/multipart"
 
 	"eka-dev.cloud/transaction-service/config"
 	"eka-dev.cloud/transaction-service/utils/response"
-	"github.com/gofiber/fiber/v2/log"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 )
@@ -14,8 +14,12 @@ import (
 var minioClient *minio.Client
 
 func init() {
-	log.Info("Lib initialized minio")
+	slog.Info("Lib initialized minio")
 	endpoint := config.Config.MinioEndpoint
+	if endpoint == "" {
+		slog.Warn("MinIO endpoint is empty, skipping client initialization")
+		return
+	}
 	accessKey := config.Config.MinioAccessKey
 	secretKey := config.Config.MinioSecretKey
 	useSSL := config.Config.MinioUseSSL
@@ -27,11 +31,12 @@ func init() {
 	})
 
 	if err != nil {
-		log.Fatal("Failed to initialize MinIO client:", err)
+		slog.Error("Failed to initialize MinIO client", "error", err)
+		return
 	}
 	minioClient = minioGenerateClient
 
-	log.Info("MinIO client initialized successfully")
+	slog.Info("MinIO client initialized successfully")
 }
 
 func UploadFile(filePath string, fileHeader *multipart.FileHeader) (string, error) {
@@ -40,7 +45,7 @@ func UploadFile(filePath string, fileHeader *multipart.FileHeader) (string, erro
 
 	file, err := fileHeader.Open()
 	if err != nil {
-		log.Error("Failed to open file:", err)
+		slog.Error("Failed to open file", "error", err)
 		return "", response.InternalServerError("Failed to open file", nil)
 	}
 
@@ -48,7 +53,7 @@ func UploadFile(filePath string, fileHeader *multipart.FileHeader) (string, erro
 		ContentType: fileHeader.Header.Get("Content-Type"),
 	})
 	if err != nil {
-		log.Error("Failed to upload file to MinIO:", err)
+		slog.Error("Failed to upload file to MinIO", "error", err)
 		return "", response.InternalServerError("Failed to upload file", nil)
 	}
 
@@ -63,7 +68,7 @@ func DeleteFile(filePath string) error {
 
 	err := minioClient.RemoveObject(ctx, bucketName, filePath, minio.RemoveObjectOptions{})
 	if err != nil {
-		log.Error("Failed to delete file from MinIO:", err)
+		slog.Error("Failed to delete file from MinIO", "error", err)
 		return response.InternalServerError("Failed to delete file", nil)
 	}
 

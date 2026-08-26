@@ -5,12 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"time"
 
 	"eka-dev.cloud/transaction-service/utils/common"
 	"eka-dev.cloud/transaction-service/utils/response"
-	"github.com/gofiber/fiber/v2/log"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/propagation"
@@ -18,10 +18,12 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+var HTTPClient *http.Client
+
 func InternalRequest(signature string, timestamp string, url string, method string, body io.Reader) ([]byte, error) {
 	req, err := http.NewRequest(method, url, body)
 	if err != nil {
-		log.Error("Failed to create request:", err)
+		slog.Error("Failed to create request", "error", err)
 		return nil, response.InternalServerError("Internal Server Error", nil)
 	}
 
@@ -42,18 +44,21 @@ func InternalRequest(signature string, timestamp string, url string, method stri
 	// Inject W3C Trace Context (traceparent, tracestate) into outgoing HTTP headers
 	otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(req.Header))
 
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := HTTPClient
+	if client == nil {
+		client = &http.Client{Timeout: 10 * time.Second}
+	}
 	res, err := client.Do(req.WithContext(ctx))
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
-		log.Error("Failed to send request:", err)
+		slog.Error("Failed to send request", "error", err)
 		return nil, response.InternalServerError("Internal Server Error", nil)
 	}
 	defer func(Body io.ReadCloser) {
 		err := Body.Close()
 		if err != nil {
-			log.Error("Failed to close response body:", err)
+			slog.Error("Failed to close response body", "error", err)
 		}
 	}(res.Body)
 
@@ -67,16 +72,16 @@ func InternalRequest(signature string, timestamp string, url string, method stri
 	if res.StatusCode != http.StatusOK {
 		resBody, err := io.ReadAll(res.Body)
 		if err != nil {
-			log.Error("Failed to read response body:", err)
+			slog.Error("Failed to read response body", "error", err)
 			return nil, response.InternalServerError("Internal Server Error", nil)
 		}
-		log.Errorf("Received non-OK response: %s, body: %s", res.Status, string(resBody))
+		slog.Error("Received non-OK response", "status", res.Status, "body", string(resBody))
 
 		var errorResponse common.InternalResponse
 
 		err = json.Unmarshal(resBody, &errorResponse)
 		if err != nil {
-			log.Error("Failed to unmarshal error response:", err)
+			slog.Error("Failed to unmarshal error response", "error", err)
 			return nil, response.InternalServerError("Internal Server Error", nil)
 		}
 
@@ -86,7 +91,7 @@ func InternalRequest(signature string, timestamp string, url string, method stri
 	//Process the response body as needed
 	resBody, err := io.ReadAll(res.Body)
 	if err != nil {
-		log.Error("Failed to read response body:", err)
+		slog.Error("Failed to read response body", "error", err)
 		return nil, response.InternalServerError("Internal Server Error", nil)
 	}
 

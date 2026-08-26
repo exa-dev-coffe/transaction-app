@@ -38,13 +38,28 @@ type InternalResponse struct {
 	Success bool   `json:"success"`
 }
 
+type PermissionAction struct {
+	View   bool `json:"view"`
+	Create bool `json:"create"`
+	Edit   bool `json:"edit"`
+	Delete bool `json:"delete"`
+}
+
 type Claims struct {
-	FullName string `json:"FullName"`
-	Email    string `json:"Email"`
-	UserId   int64  `json:"UserId"`
-	Type     string `json:"Type"`
-	Role     string `json:"Role"`
+	FullName    string                      `json:"FullName"`
+	Email       string                      `json:"Email"`
+	UserId      int64                       `json:"UserId"`
+	Type        string                      `json:"Type"`
+	Role        string                      `json:"Role"`
+	RoleId      int                         `json:"RoleId"`
+	Permissions map[string]PermissionAction `json:"Permissions"`
 	jwt.RegisteredClaims
+}
+
+type InternalRolePermissionsResponse struct {
+	Success bool                        `json:"success"`
+	Message string                      `json:"message"`
+	Data    map[string]PermissionAction `json:"data"`
 }
 
 type DateOrder struct {

@@ -1,20 +1,48 @@
 package middleware
 
 import (
+	"io"
+	"log"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"go.opentelemetry.io/otel/trace"
 )
 
-// InitLogger initializes slog as default logger with JSONHandler
+// InitLogger initializes slog as default logger with JSONHandler and redirects stdlib log.
+// If environment variable LOG_TO_FILE=true is set, it writes logs to both Console and logs/<serviceName>.log
 func InitLogger(serviceName string) {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+	var writer io.Writer = os.Stdout
+
+	if os.Getenv("LOG_TO_FILE") == "true" {
+		logDir := "logs"
+		if err := os.MkdirAll(logDir, 0755); err == nil {
+			logFilePath := filepath.Join(logDir, serviceName+".log")
+			file, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+			if err == nil {
+				writer = io.MultiWriter(os.Stdout, file)
+			} else {
+				slog.Error("Failed to open log file", "path", logFilePath, "error", err)
+			}
+		} else {
+			slog.Error("Failed to create log directory", "dir", logDir, "error", err)
+		}
+	}
+
+	logger := slog.New(slog.NewJSONHandler(writer, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	})).With("app_name", serviceName)
 	slog.SetDefault(logger)
+
+	log.SetFlags(0)
+	log.SetOutput(slog.NewLogLogger(logger.Handler(), slog.LevelInfo).Writer())
+}
+
+func init() {
+	InitLogger("transaction-service")
 }
 
 // RequestLogger middleware logs HTTP requests using slog with request_id

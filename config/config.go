@@ -1,7 +1,7 @@
 package config
 
 import (
-	"log"
+	"log/slog"
 	"time"
 
 	"github.com/spf13/viper"
@@ -29,18 +29,22 @@ type appConfig struct {
 	AllowedOrigins       string
 	RabbitmqUrl          string
 	ServiceAccountUrl    string
+	RedisUrl             string
+	RedisUsername        string
+	RedisPassword        string
+	ServiceTransactionUrl string
 }
 
 var Config appConfig
 
 func init() {
 	// Load env
-	log.Println("Loading .env file")
+	slog.Info("Loading .env file")
 	viper.SetConfigFile(".env") // atau bisa juga pakai viper.SetConfigName("app") + viper.AddConfigPath(".")
 	viper.AutomaticEnv()        // override dengan ENV OS kalau ada
 
 	if err := viper.ReadInConfig(); err != nil {
-		log.Println("No .env file found, fallback to system environment")
+		slog.Warn("No .env file found, fallback to system environment")
 	}
 
 	Config = appConfig{
@@ -65,5 +69,21 @@ func init() {
 		AllowedOrigins:       viper.GetString("ALLOWED_ORIGINS"),
 		RabbitmqUrl:          viper.GetString("RABBITMQ_URL"),
 		ServiceAccountUrl:    viper.GetString("SERVICE_ACCOUNT_URL"),
+		RedisUrl:             viper.GetString("REDIS_URL"),
+		RedisUsername:        viper.GetString("REDIS_USERNAME"),
+		RedisPassword:        viper.GetString("REDIS_PASSWORD"),
+		ServiceTransactionUrl: viper.GetString("SERVICE_TRANSACTION_URL"),
+	}
+	if Config.ServiceMasterDataUrl == "" {
+		Config.ServiceMasterDataUrl = "http://localhost:8081"
+	}
+	if Config.ServiceWalletUrl == "" {
+		Config.ServiceWalletUrl = "http://localhost:8082"
+	}
+	if Config.ServiceAccountUrl == "" {
+		Config.ServiceAccountUrl = "http://localhost:8080"
+	}
+	if Config.ServiceTransactionUrl == "" {
+		Config.ServiceTransactionUrl = "http://localhost:8084"
 	}
 }
