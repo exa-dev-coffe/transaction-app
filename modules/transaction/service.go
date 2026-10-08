@@ -2,6 +2,7 @@ package transaction
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -22,19 +23,19 @@ import (
 
 type Service interface {
 	// TODO: define service methods
-	CreateTransaction(tx *sqlx.Tx, request CreateTransactionRequest) error
-	CreatePosTransaction(tx *sqlx.Tx, request CreatePosTransactionRequest) (*TransactionResponse, error)
-	ChangePosPaymentMethod(tx *sqlx.Tx, id int, request ChangePosPaymentMethodRequest) (*TransactionResponse, error)
-	SyncPosQrisStatus(id int) (*TransactionResponse, error)
-	SettlePosQrisPayment(orderRef string, status string) (*TransactionResponse, error)
-	GetListTransactionsPagination(request GetListTransactionsRequest) (*response.Pagination[[]TransactionResponse], error)
-	GetListTransactionsNoPagination(request GetListTransactionsRequest) ([]TransactionResponse, error)
-	GetOneTransaction(request *common.OneRequest) (*TransactionResponse, error)
-	GetListTransactionsByUserId(request common.ParamsListRequest, userId int64, name string) (*response.Pagination[[]TransactionResponse], error)
-	GetOneTransactionByUserId(request *common.OneRequest, userId int64, name string) (*TransactionResponse, error)
-	UpdateOrderStatus(tx *sqlx.Tx, request UpdateOrderStatusRequest) error
-	SetRatingMenu(tx *sqlx.Tx, request SetRatingMenuRequest) error
-	SummaryReportTransactions(startDate string, endDate string) (*SummaryReportData, error)
+	CreateTransaction(ctx context.Context, tx *sqlx.Tx, request CreateTransactionRequest) error
+	CreatePosTransaction(ctx context.Context, tx *sqlx.Tx, request CreatePosTransactionRequest) (*TransactionResponse, error)
+	ChangePosPaymentMethod(ctx context.Context, tx *sqlx.Tx, id int, request ChangePosPaymentMethodRequest) (*TransactionResponse, error)
+	SyncPosQrisStatus(ctx context.Context, id int) (*TransactionResponse, error)
+	SettlePosQrisPayment(ctx context.Context, orderRef string, status string) (*TransactionResponse, error)
+	GetListTransactionsPagination(ctx context.Context, request GetListTransactionsRequest) (*response.Pagination[[]TransactionResponse], error)
+	GetListTransactionsNoPagination(ctx context.Context, request GetListTransactionsRequest) ([]TransactionResponse, error)
+	GetOneTransaction(ctx context.Context, request *common.OneRequest) (*TransactionResponse, error)
+	GetListTransactionsByUserId(ctx context.Context, request common.ParamsListRequest, userId int64, name string) (*response.Pagination[[]TransactionResponse], error)
+	GetOneTransactionByUserId(ctx context.Context, request *common.OneRequest, userId int64, name string) (*TransactionResponse, error)
+	UpdateOrderStatus(ctx context.Context, tx *sqlx.Tx, request UpdateOrderStatusRequest) error
+	SetRatingMenu(ctx context.Context, tx *sqlx.Tx, request SetRatingMenuRequest) error
+	SummaryReportTransactions(ctx context.Context, startDate string, endDate string) (*SummaryReportData, error)
 }
 
 type transactionService struct {
@@ -47,7 +48,7 @@ func NewTransactionService(repo Repository, voucherService voucher.Service, db *
 	return &transactionService{repo: repo, voucherService: voucherService, db: db}
 }
 
-func (s *transactionService) CreateTransaction(tx *sqlx.Tx, request CreateTransactionRequest) error {
+func (s *transactionService) CreateTransaction(ctx context.Context, tx *sqlx.Tx, request CreateTransactionRequest) error {
 	// Convert menuIds slice to a comma-separated string
 	var ids string
 	for i, data := range request.Datas {
@@ -71,7 +72,7 @@ func (s *transactionService) CreateTransaction(tx *sqlx.Tx, request CreateTransa
 	var discountAmount float64 = 0
 
 	if request.VoucherCode != "" {
-		vId, discount, err := s.voucherService.ValidateVoucherForCheckout(tx, request.VoucherCode, request.Total, request.CreatedBy)
+		vId, discount, err := s.voucherService.ValidateVoucherForCheckout(ctx, tx, request.VoucherCode, request.Total, request.CreatedBy)
 		if err != nil {
 			return err
 		}
@@ -81,20 +82,20 @@ func (s *transactionService) CreateTransaction(tx *sqlx.Tx, request CreateTransa
 	}
 
 	// 1. Insert Header & Details into DB Transaction FIRST
-	id, err := s.repo.InsertThTransaction(tx, request, voucherId, discountAmount)
+	id, err := s.repo.InsertThTransaction(ctx, tx, request, voucherId, discountAmount)
 	if err != nil {
 		return err
 	}
 
 	if voucherId != nil {
-		err = s.voucherService.LogVoucherUsage(tx, request.CreatedBy, *voucherId, int64(id), discountAmount)
+		err = s.voucherService.LogVoucherUsage(ctx, tx, request.CreatedBy, *voucherId, int64(id), discountAmount)
 		if err != nil {
 			return err
 		}
 	}
 
 	// Bulk Batch Write for Transaction Details
-	err = s.repo.InsertTdTransactionBatch(tx, id, request.CreatedBy, request.Datas)
+	err = s.repo.InsertTdTransactionBatch(ctx, tx, id, request.CreatedBy, request.Datas)
 	if err != nil {
 		return err
 	}
@@ -119,7 +120,7 @@ func (s *transactionService) CreateTransaction(tx *sqlx.Tx, request CreateTransa
 	}
 
 	if len(promoLogs) > 0 {
-		_ = s.repo.LogPromotionUsageBatch(tx, promoLogs)
+		_ = s.repo.LogPromotionUsageBatch(ctx, tx, promoLogs)
 	}
 
 	// 2. Perform Wallet Payment AFTER DB records are established in transaction
@@ -134,7 +135,7 @@ func (s *transactionService) CreateTransaction(tx *sqlx.Tx, request CreateTransa
 		time.Sleep(50 * time.Millisecond)
 
 		// Fetch full transaction details (including menu names, table name, user name)
-		orderDetail, err := s.GetOneTransaction(&common.OneRequest{Id: id})
+		orderDetail, err := s.GetOneTransaction(context.Background(), &common.OneRequest{Id: id})
 		if err != nil {
 			slog.Error("Failed to fetch full order details for SSE new order", "error", err)
 			return
@@ -205,7 +206,7 @@ func (s *transactionService) CreateTransaction(tx *sqlx.Tx, request CreateTransa
 	return nil
 }
 
-func (s *transactionService) CreatePosTransaction(tx *sqlx.Tx, request CreatePosTransactionRequest) (*TransactionResponse, error) {
+func (s *transactionService) CreatePosTransaction(ctx context.Context, tx *sqlx.Tx, request CreatePosTransactionRequest) (*TransactionResponse, error) {
 	// Convert menuIds slice to a comma-separated string
 	var ids string
 	for i, data := range request.Datas {
@@ -254,7 +255,7 @@ func (s *transactionService) CreatePosTransaction(tx *sqlx.Tx, request CreatePos
 	var discountAmount float64 = 0
 
 	if request.VoucherCode != "" {
-		vId, discount, err := s.voucherService.ValidateVoucherForCheckout(tx, request.VoucherCode, request.Total, request.CreatedBy)
+		vId, discount, err := s.voucherService.ValidateVoucherForCheckout(ctx, tx, request.VoucherCode, request.Total, request.CreatedBy)
 		if err != nil {
 			return nil, err
 		}
@@ -280,20 +281,20 @@ func (s *transactionService) CreatePosTransaction(tx *sqlx.Tx, request CreatePos
 	}
 
 	// 1. Insert Header & Details into DB Transaction FIRST
-	id, err := s.repo.InsertThPosTransaction(tx, request, voucherId, discountAmount, paymentStatus)
+	id, err := s.repo.InsertThPosTransaction(ctx, tx, request, voucherId, discountAmount, paymentStatus)
 	if err != nil {
 		return nil, err
 	}
 
 	if voucherId != nil {
-		err = s.voucherService.LogVoucherUsage(tx, request.CreatedBy, *voucherId, int64(id), discountAmount)
+		err = s.voucherService.LogVoucherUsage(ctx, tx, request.CreatedBy, *voucherId, int64(id), discountAmount)
 		if err != nil {
 			return nil, err
 		}
 	}
 
 	// Bulk Batch Write for Transaction Details
-	err = s.repo.InsertTdTransactionBatch(tx, id, request.CreatedBy, request.Datas)
+	err = s.repo.InsertTdTransactionBatch(ctx, tx, id, request.CreatedBy, request.Datas)
 	if err != nil {
 		return nil, err
 	}
@@ -318,7 +319,7 @@ func (s *transactionService) CreatePosTransaction(tx *sqlx.Tx, request CreatePos
 	}
 
 	if len(promoLogs) > 0 {
-		_ = s.repo.LogPromotionUsageBatch(tx, promoLogs)
+		_ = s.repo.LogPromotionUsageBatch(ctx, tx, promoLogs)
 	}
 
 	// 2. Execute External Payment Processing AFTER DB record is established in transaction
@@ -334,7 +335,7 @@ func (s *transactionService) CreatePosTransaction(tx *sqlx.Tx, request CreatePos
 			request.OrderFor = walletRes.CustomerName
 		}
 		if walletRes.UserId > 0 || walletRes.CustomerName != "" {
-			_ = s.repo.UpdatePosWalletCustomer(tx, id, request.CreatedBy, request.OrderFor)
+			_ = s.repo.UpdatePosWalletCustomer(ctx, tx, id, request.CreatedBy, request.OrderFor)
 		}
 	} else if strings.EqualFold(request.PaymentMethod, "MIDTRANS") {
 		posOrderRef := fmt.Sprintf("POS-%d", id)
@@ -344,7 +345,7 @@ func (s *transactionService) CreatePosTransaction(tx *sqlx.Tx, request CreatePos
 		}
 		qrString = qrisRes.QrString
 		qrUrl = qrisRes.QrUrl
-		_ = s.repo.UpdatePosQrisData(tx, id, qrString, qrUrl)
+		_ = s.repo.UpdatePosQrisData(ctx, tx, id, qrString, qrUrl)
 	}
 
 	// Trigger notifications asynchronously if already paid (CASH or WALLET)
@@ -352,7 +353,7 @@ func (s *transactionService) CreatePosTransaction(tx *sqlx.Tx, request CreatePos
 		go func() {
 			time.Sleep(50 * time.Millisecond)
 
-			orderDetail, err := s.GetOneTransaction(&common.OneRequest{Id: id})
+			orderDetail, err := s.GetOneTransaction(context.Background(), &common.OneRequest{Id: id})
 			if err != nil {
 				slog.Error("Failed to fetch full order details for SSE new order", "error", err)
 				return
@@ -409,7 +410,7 @@ func (s *transactionService) CreatePosTransaction(tx *sqlx.Tx, request CreatePos
 	return res, nil
 }
 
-func (s *transactionService) SettlePosQrisPayment(orderRef string, status string) (*TransactionResponse, error) {
+func (s *transactionService) SettlePosQrisPayment(ctx context.Context, orderRef string, status string) (*TransactionResponse, error) {
 	if !strings.HasPrefix(orderRef, "POS-") {
 		return nil, response.BadRequest("Invalid POS order reference", nil)
 	}
@@ -425,10 +426,10 @@ func (s *transactionService) SettlePosQrisPayment(orderRef string, status string
 	}
 
 	if strings.EqualFold(status, "PAID") || strings.EqualFold(status, "COMPLETED") || strings.EqualFold(status, "SETTLEMENT") {
-		return s.markOrderAsPaidAndNotify(id)
+		return s.markOrderAsPaidAndNotify(ctx, id)
 	}
 
-	return s.SyncPosQrisStatus(id)
+	return s.SyncPosQrisStatus(ctx, id)
 }
 
 func (s *transactionService) notifyOrderPaidAsync(orderDetail *TransactionResponse) {
@@ -461,8 +462,8 @@ func (s *transactionService) notifyOrderPaidAsync(orderDetail *TransactionRespon
 	}()
 }
 
-func (s *transactionService) markOrderAsPaidAndNotify(id int) (*TransactionResponse, error) {
-	orderDetail, err := s.GetOneTransaction(&common.OneRequest{Id: id})
+func (s *transactionService) markOrderAsPaidAndNotify(ctx context.Context, id int) (*TransactionResponse, error) {
+	orderDetail, err := s.GetOneTransaction(ctx, &common.OneRequest{Id: id})
 	if err != nil {
 		return nil, err
 	}
@@ -471,7 +472,9 @@ func (s *transactionService) markOrderAsPaidAndNotify(id int) (*TransactionRespo
 		return orderDetail, nil
 	}
 
-	err = s.repo.UpdatePaymentStatus(nil, id, "PAID")
+	err = common.WithTransactionContext(ctx, s.db, func(tx *sqlx.Tx, _ interface{}) error {
+		return s.repo.UpdatePaymentStatus(ctx, tx, id, "PAID")
+	}, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -482,8 +485,8 @@ func (s *transactionService) markOrderAsPaidAndNotify(id int) (*TransactionRespo
 	return orderDetail, nil
 }
 
-func (s *transactionService) SyncPosQrisStatus(id int) (*TransactionResponse, error) {
-	orderDetail, err := s.GetOneTransaction(&common.OneRequest{Id: id})
+func (s *transactionService) SyncPosQrisStatus(ctx context.Context, id int) (*TransactionResponse, error) {
+	orderDetail, err := s.GetOneTransaction(ctx, &common.OneRequest{Id: id})
 	if err != nil {
 		return nil, err
 	}
@@ -520,12 +523,12 @@ func (s *transactionService) SyncPosQrisStatus(id int) (*TransactionResponse, er
 		return nil, response.BadRequest(fmt.Sprintf("Payment is not settled yet. Current status: %s", txStatus), nil)
 	}
 
-	return s.markOrderAsPaidAndNotify(id)
+	return s.markOrderAsPaidAndNotify(ctx, id)
 }
 
-func (s *transactionService) ChangePosPaymentMethod(tx *sqlx.Tx, id int, request ChangePosPaymentMethodRequest) (*TransactionResponse, error) {
+func (s *transactionService) ChangePosPaymentMethod(ctx context.Context, tx *sqlx.Tx, id int, request ChangePosPaymentMethodRequest) (*TransactionResponse, error) {
 	// 1. Fetch & Verify Order State
-	orderDetail, err := s.GetOneTransaction(&common.OneRequest{Id: id})
+	orderDetail, err := s.GetOneTransaction(ctx, &common.OneRequest{Id: id})
 	if err != nil {
 		return nil, err
 	}
@@ -545,7 +548,7 @@ func (s *transactionService) ChangePosPaymentMethod(tx *sqlx.Tx, id int, request
 		cashAmount = request.CashAmount
 		cashChange = request.CashChange
 
-		err = s.repo.UpdatePosPaymentMethod(tx, id, "CASH", "PAID", cashAmount, cashChange)
+		err = s.repo.UpdatePosPaymentMethod(ctx, tx, id, "CASH", "PAID", cashAmount, cashChange)
 		if err != nil {
 			return nil, err
 		}
@@ -572,13 +575,13 @@ func (s *transactionService) ChangePosPaymentMethod(tx *sqlx.Tx, id int, request
 			newOrderFor = walletRes.CustomerName
 		}
 		if newUserId > 0 || newOrderFor != orderDetail.OrderFor {
-			err = s.repo.UpdatePosWalletCustomer(tx, id, newUserId, newOrderFor)
+			err = s.repo.UpdatePosWalletCustomer(ctx, tx, id, newUserId, newOrderFor)
 			if err != nil {
 				return nil, err
 			}
 		}
 
-		err = s.repo.UpdatePosPaymentMethod(tx, id, "WALLET", "PAID", 0, 0)
+		err = s.repo.UpdatePosPaymentMethod(ctx, tx, id, "WALLET", "PAID", 0, 0)
 		if err != nil {
 			return nil, err
 		}
@@ -599,8 +602,8 @@ func (s *transactionService) ChangePosPaymentMethod(tx *sqlx.Tx, id int, request
 	return orderDetail, nil
 }
 
-func (s *transactionService) GetListTransactionsPagination(request GetListTransactionsRequest) (*response.Pagination[[]TransactionResponse], error) {
-	res, err := s.repo.GetListTransactionsPagination(request.ParamsListRequest, request.StartDate, request.EndDate)
+func (s *transactionService) GetListTransactionsPagination(ctx context.Context, request GetListTransactionsRequest) (*response.Pagination[[]TransactionResponse], error) {
+	res, err := s.repo.GetListTransactionsPagination(ctx, request.ParamsListRequest, request.StartDate, request.EndDate)
 	if err != nil {
 		return nil, err
 	}
@@ -689,8 +692,8 @@ func (s *transactionService) GetListTransactionsPagination(request GetListTransa
 	return res, nil
 }
 
-func (s *transactionService) GetListTransactionsNoPagination(request GetListTransactionsRequest) ([]TransactionResponse, error) {
-	res, err := s.repo.GetListTransactionsNoPagination(request.ParamsListRequest, request.StartDate, request.EndDate)
+func (s *transactionService) GetListTransactionsNoPagination(ctx context.Context, request GetListTransactionsRequest) ([]TransactionResponse, error) {
+	res, err := s.repo.GetListTransactionsNoPagination(ctx, request.ParamsListRequest, request.StartDate, request.EndDate)
 	if err != nil {
 		return nil, err
 	}
@@ -781,8 +784,8 @@ func (s *transactionService) GetListTransactionsNoPagination(request GetListTran
 	return res, nil
 }
 
-func (s *transactionService) GetOneTransaction(request *common.OneRequest) (*TransactionResponse, error) {
-	res, err := s.repo.GetOneTransaction(request.Id)
+func (s *transactionService) GetOneTransaction(ctx context.Context, request *common.OneRequest) (*TransactionResponse, error) {
+	res, err := s.repo.GetOneTransaction(ctx, request.Id)
 	if err != nil {
 		return nil, err
 	}
@@ -841,8 +844,8 @@ func (s *transactionService) GetOneTransaction(request *common.OneRequest) (*Tra
 	return res, nil
 }
 
-func (s *transactionService) GetListTransactionsByUserId(request common.ParamsListRequest, userId int64, name string) (*response.Pagination[[]TransactionResponse], error) {
-	res, err := s.repo.GetListTransactionsByUserId(request, userId)
+func (s *transactionService) GetListTransactionsByUserId(ctx context.Context, request common.ParamsListRequest, userId int64, name string) (*response.Pagination[[]TransactionResponse], error) {
+	res, err := s.repo.GetListTransactionsByUserId(ctx, request, userId)
 	if err != nil {
 		return nil, err
 	}
@@ -918,8 +921,8 @@ func (s *transactionService) GetListTransactionsByUserId(request common.ParamsLi
 	return res, nil
 }
 
-func (s *transactionService) GetOneTransactionByUserId(request *common.OneRequest, userId int64, name string) (*TransactionResponse, error) {
-	res, err := s.repo.GetOneTransactionByUserId(request.Id, userId)
+func (s *transactionService) GetOneTransactionByUserId(ctx context.Context, request *common.OneRequest, userId int64, name string) (*TransactionResponse, error) {
+	res, err := s.repo.GetOneTransactionByUserId(ctx, request.Id, userId)
 	if err != nil {
 		return nil, err
 	}
@@ -972,8 +975,8 @@ func (s *transactionService) GetOneTransactionByUserId(request *common.OneReques
 	return res, nil
 }
 
-func (s *transactionService) UpdateOrderStatus(tx *sqlx.Tx, request UpdateOrderStatusRequest) error {
-	err := s.repo.UpdateOrderStatus(tx, request.Id, request.UpdatedBy)
+func (s *transactionService) UpdateOrderStatus(ctx context.Context, tx *sqlx.Tx, request UpdateOrderStatusRequest) error {
+	err := s.repo.UpdateOrderStatus(ctx, tx, request.Id, request.UpdatedBy)
 	if err != nil {
 		return err
 	}
@@ -983,7 +986,7 @@ func (s *transactionService) UpdateOrderStatus(tx *sqlx.Tx, request UpdateOrderS
 		// Wait a small duration to ensure DB transaction is committed
 		time.Sleep(50 * time.Millisecond)
 
-		orderDetail, err := s.GetOneTransaction(&common.OneRequest{Id: request.Id})
+		orderDetail, err := s.GetOneTransaction(context.Background(), &common.OneRequest{Id: request.Id})
 		if err != nil {
 			slog.Error("Failed to fetch full order details for SSE update status", "error", err)
 			return
@@ -1023,8 +1026,8 @@ func (s *transactionService) UpdateOrderStatus(tx *sqlx.Tx, request UpdateOrderS
 	return nil
 }
 
-func (s *transactionService) SetRatingMenu(tx *sqlx.Tx, request SetRatingMenuRequest) error {
-	idMenu, err := s.repo.SetRatingMenu(tx, request.Id, request.Rating, request.UpdatedBy)
+func (s *transactionService) SetRatingMenu(ctx context.Context, tx *sqlx.Tx, request SetRatingMenuRequest) error {
+	idMenu, err := s.repo.SetRatingMenu(ctx, tx, request.Id, request.Rating, request.UpdatedBy)
 	if err != nil {
 		return err
 	}
@@ -1047,8 +1050,8 @@ func (s *transactionService) SetRatingMenu(tx *sqlx.Tx, request SetRatingMenuReq
 	return nil
 }
 
-func (s *transactionService) SummaryReportTransactions(startDate string, endDate string) (*SummaryReportData, error) {
-	return s.repo.SummaryReportTransactions(startDate, endDate)
+func (s *transactionService) SummaryReportTransactions(ctx context.Context, startDate string, endDate string) (*SummaryReportData, error) {
+	return s.repo.SummaryReportTransactions(ctx, startDate, endDate)
 }
 
 func calculateTotalPriceMenu(menus []MenuResponse, request *CreateTransactionRequest) float64 {

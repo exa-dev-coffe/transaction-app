@@ -81,7 +81,7 @@ func initiator() {
 	// Initialize modules
 	voucherRepo := voucher.NewVoucherRepository(db.DB)
 	voucherService := voucher.NewVoucherService(voucherRepo, db.DB)
-	voucher.NewHandler(fiberApp, voucherService)
+	voucher.NewHandler(fiberApp, voucherService, db.DB)
 
 	transactionRepo := transaction.NewTransactionRepository(db.DB)
 	transactionService := transaction.NewTransactionService(transactionRepo, voucherService, db.DB)

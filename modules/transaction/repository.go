@@ -1,6 +1,7 @@
 package transaction
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -22,25 +23,24 @@ type PromotionUsageLog struct {
 }
 
 type Repository interface {
-	// TODO: define repository methods
-	InsertThTransaction(tx *sqlx.Tx, transaction CreateTransactionRequest, voucherId *int64, discountAmount float64) (int, error)
-	InsertThPosTransaction(tx *sqlx.Tx, transaction CreatePosTransactionRequest, voucherId *int64, discountAmount float64, paymentStatus string) (int, error)
-	InsertTdTransaction(tx *sqlx.Tx, transactionId int, createdBy int64, data Data) error
-	InsertTdTransactionBatch(tx *sqlx.Tx, transactionId int, createdBy int64, datas []Data) error
-	GetListTransactionsPagination(params common.ParamsListRequest, startDate string, endDate string) (*response.Pagination[[]TransactionResponse], error)
-	GetListTransactionsNoPagination(request common.ParamsListRequest, startDate string, endDate string) ([]TransactionResponse, error)
-	GetOneTransaction(id int) (*TransactionResponse, error)
-	GetListTransactionsByUserId(params common.ParamsListRequest, userId int64) (*response.Pagination[[]TransactionResponse], error)
-	GetOneTransactionByUserId(id int, userId int64) (*TransactionResponse, error)
-	UpdateOrderStatus(tx *sqlx.Tx, id int, updatedBy int64) error
-	UpdatePaymentStatus(tx *sqlx.Tx, id int, status string) error
-	UpdatePosPaymentMethod(tx *sqlx.Tx, id int, paymentMethod string, paymentStatus string, cashAmount float64, cashChange float64) error
-	UpdatePosWalletCustomer(tx *sqlx.Tx, id int, userId int64, orderFor string) error
-	UpdatePosQrisData(tx *sqlx.Tx, id int, qrString string, qrUrl string) error
-	SetRatingMenu(tx *sqlx.Tx, id int, rating int, updatedBy int64) (int, error)
-	SummaryReportTransactions(startDate string, endDate string) (*SummaryReportData, error)
-	LogPromotionUsage(tx *sqlx.Tx, transactionId int64, promotionId int64, menuId int64, userId int64, qty int, discountAmount float64) error
-	LogPromotionUsageBatch(tx *sqlx.Tx, usages []PromotionUsageLog) error
+	InsertThTransaction(ctx context.Context, tx *sqlx.Tx, transaction CreateTransactionRequest, voucherId *int64, discountAmount float64) (int, error)
+	InsertThPosTransaction(ctx context.Context, tx *sqlx.Tx, transaction CreatePosTransactionRequest, voucherId *int64, discountAmount float64, paymentStatus string) (int, error)
+	InsertTdTransaction(ctx context.Context, tx *sqlx.Tx, transactionId int, createdBy int64, data Data) error
+	InsertTdTransactionBatch(ctx context.Context, tx *sqlx.Tx, transactionId int, createdBy int64, datas []Data) error
+	GetListTransactionsPagination(ctx context.Context, params common.ParamsListRequest, startDate string, endDate string) (*response.Pagination[[]TransactionResponse], error)
+	GetListTransactionsNoPagination(ctx context.Context, request common.ParamsListRequest, startDate string, endDate string) ([]TransactionResponse, error)
+	GetOneTransaction(ctx context.Context, id int) (*TransactionResponse, error)
+	GetListTransactionsByUserId(ctx context.Context, params common.ParamsListRequest, userId int64) (*response.Pagination[[]TransactionResponse], error)
+	GetOneTransactionByUserId(ctx context.Context, id int, userId int64) (*TransactionResponse, error)
+	UpdateOrderStatus(ctx context.Context, tx *sqlx.Tx, id int, updatedBy int64) error
+	UpdatePaymentStatus(ctx context.Context, tx *sqlx.Tx, id int, status string) error
+	UpdatePosPaymentMethod(ctx context.Context, tx *sqlx.Tx, id int, paymentMethod string, paymentStatus string, cashAmount float64, cashChange float64) error
+	UpdatePosWalletCustomer(ctx context.Context, tx *sqlx.Tx, id int, userId int64, orderFor string) error
+	UpdatePosQrisData(ctx context.Context, tx *sqlx.Tx, id int, qrString string, qrUrl string) error
+	SetRatingMenu(ctx context.Context, tx *sqlx.Tx, id int, rating int, updatedBy int64) (int, error)
+	SummaryReportTransactions(ctx context.Context, startDate string, endDate string) (*SummaryReportData, error)
+	LogPromotionUsage(ctx context.Context, tx *sqlx.Tx, transactionId int64, promotionId int64, menuId int64, userId int64, qty int, discountAmount float64) error
+	LogPromotionUsageBatch(ctx context.Context, tx *sqlx.Tx, usages []PromotionUsageLog) error
 }
 
 type transactionRepository struct {
@@ -51,12 +51,12 @@ func NewTransactionRepository(db *sqlx.DB) Repository {
 	return &transactionRepository{db: db}
 }
 
-func (r *transactionRepository) InsertThTransaction(tx *sqlx.Tx, transaction CreateTransactionRequest, voucherId *int64, discountAmount float64) (int, error) {
+func (r *transactionRepository) InsertThTransaction(ctx context.Context, tx *sqlx.Tx, transaction CreateTransactionRequest, voucherId *int64, discountAmount float64) (int, error) {
 	var id int
 	query := `INSERT INTO th_user_checkouts (user_id, table_id, order_for, total_price, created_by, voucher_id, discount_amount, order_type, payment_method, payment_status, is_cashier) 
 	          VALUES ($1, $2, $3, $4, $5, $6, $7, 'DINE_IN', 'WALLET', 'PAID', FALSE) RETURNING id`
 
-	err := tx.QueryRow(query, transaction.CreatedBy, transaction.TableId, transaction.OrderFor, transaction.Total, transaction.CreatedBy, voucherId, discountAmount).Scan(&id)
+	err := tx.QueryRowxContext(ctx, query, transaction.CreatedBy, transaction.TableId, transaction.OrderFor, transaction.Total, transaction.CreatedBy, voucherId, discountAmount).Scan(&id)
 	if err != nil {
 		slog.Error("Failed to insert transaction", "error", err)
 		return 0, response.InternalServerError("Failed to insert transaction", nil)
@@ -64,7 +64,7 @@ func (r *transactionRepository) InsertThTransaction(tx *sqlx.Tx, transaction Cre
 	return id, nil
 }
 
-func (r *transactionRepository) InsertThPosTransaction(tx *sqlx.Tx, transaction CreatePosTransactionRequest, voucherId *int64, discountAmount float64, paymentStatus string) (int, error) {
+func (r *transactionRepository) InsertThPosTransaction(ctx context.Context, tx *sqlx.Tx, transaction CreatePosTransactionRequest, voucherId *int64, discountAmount float64, paymentStatus string) (int, error) {
 	var id int
 	query := `INSERT INTO th_user_checkouts (user_id, table_id, order_for, total_price, created_by, voucher_id, discount_amount, order_type, payment_method, payment_status, cash_amount, cash_change, is_cashier) 
 	          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, TRUE) RETURNING id`
@@ -74,7 +74,7 @@ func (r *transactionRepository) InsertThPosTransaction(tx *sqlx.Tx, transaction 
 		tableId = transaction.TableId
 	}
 
-	err := tx.QueryRow(query, transaction.CreatedBy, tableId, transaction.OrderFor, transaction.Total, transaction.CreatedBy, voucherId, discountAmount, transaction.OrderType, transaction.PaymentMethod, paymentStatus, transaction.CashAmount, transaction.CashChange).Scan(&id)
+	err := tx.QueryRowxContext(ctx, query, transaction.CreatedBy, tableId, transaction.OrderFor, transaction.Total, transaction.CreatedBy, voucherId, discountAmount, transaction.OrderType, transaction.PaymentMethod, paymentStatus, transaction.CashAmount, transaction.CashChange).Scan(&id)
 	if err != nil {
 		slog.Error("Failed to insert POS transaction", "error", err)
 		return 0, response.InternalServerError("Failed to insert POS transaction", nil)
@@ -82,14 +82,9 @@ func (r *transactionRepository) InsertThPosTransaction(tx *sqlx.Tx, transaction 
 	return id, nil
 }
 
-func (r *transactionRepository) UpdatePaymentStatus(tx *sqlx.Tx, id int, status string) error {
+func (r *transactionRepository) UpdatePaymentStatus(ctx context.Context, tx *sqlx.Tx, id int, status string) error {
 	query := `UPDATE th_user_checkouts SET payment_status = $1, updated_at = NOW() WHERE id = $2`
-	var err error
-	if tx != nil {
-		_, err = tx.Exec(query, status, id)
-	} else {
-		_, err = r.db.Exec(query, status, id)
-	}
+	_, err := tx.ExecContext(ctx, query, status, id)
 	if err != nil {
 		slog.Error("Failed to update payment status", "error", err)
 		return response.InternalServerError("Failed to update payment status", nil)
@@ -97,14 +92,9 @@ func (r *transactionRepository) UpdatePaymentStatus(tx *sqlx.Tx, id int, status 
 	return nil
 }
 
-func (r *transactionRepository) UpdatePosPaymentMethod(tx *sqlx.Tx, id int, paymentMethod string, paymentStatus string, cashAmount float64, cashChange float64) error {
+func (r *transactionRepository) UpdatePosPaymentMethod(ctx context.Context, tx *sqlx.Tx, id int, paymentMethod string, paymentStatus string, cashAmount float64, cashChange float64) error {
 	query := `UPDATE th_user_checkouts SET payment_method = $1, payment_status = $2, cash_amount = $3, cash_change = $4, updated_at = NOW() WHERE id = $5`
-	var err error
-	if tx != nil {
-		_, err = tx.Exec(query, paymentMethod, paymentStatus, cashAmount, cashChange, id)
-	} else {
-		_, err = r.db.Exec(query, paymentMethod, paymentStatus, cashAmount, cashChange, id)
-	}
+	_, err := tx.ExecContext(ctx, query, paymentMethod, paymentStatus, cashAmount, cashChange, id)
 	if err != nil {
 		slog.Error("Failed to update POS payment method", "error", err)
 		return response.InternalServerError("Failed to update POS payment method", nil)
@@ -112,14 +102,9 @@ func (r *transactionRepository) UpdatePosPaymentMethod(tx *sqlx.Tx, id int, paym
 	return nil
 }
 
-func (r *transactionRepository) UpdatePosWalletCustomer(tx *sqlx.Tx, id int, userId int64, orderFor string) error {
+func (r *transactionRepository) UpdatePosWalletCustomer(ctx context.Context, tx *sqlx.Tx, id int, userId int64, orderFor string) error {
 	query := `UPDATE th_user_checkouts SET user_id = $1, created_by = $1, order_for = $2, updated_at = NOW() WHERE id = $3`
-	var err error
-	if tx != nil {
-		_, err = tx.Exec(query, userId, orderFor, id)
-	} else {
-		_, err = r.db.Exec(query, userId, orderFor, id)
-	}
+	_, err := tx.ExecContext(ctx, query, userId, orderFor, id)
 	if err != nil {
 		slog.Error("Failed to update POS wallet customer info", "error", err)
 		return response.InternalServerError("Failed to update POS wallet customer info", nil)
@@ -127,14 +112,9 @@ func (r *transactionRepository) UpdatePosWalletCustomer(tx *sqlx.Tx, id int, use
 	return nil
 }
 
-func (r *transactionRepository) UpdatePosQrisData(tx *sqlx.Tx, id int, qrString string, qrUrl string) error {
+func (r *transactionRepository) UpdatePosQrisData(ctx context.Context, tx *sqlx.Tx, id int, qrString string, qrUrl string) error {
 	query := `UPDATE th_user_checkouts SET qr_string = $1, qr_url = $2, updated_at = NOW() WHERE id = $3`
-	var err error
-	if tx != nil {
-		_, err = tx.Exec(query, qrString, qrUrl, id)
-	} else {
-		_, err = r.db.Exec(query, qrString, qrUrl, id)
-	}
+	_, err := tx.ExecContext(ctx, query, qrString, qrUrl, id)
 	if err != nil {
 		slog.Error("Failed to update POS QRIS data", "error", err)
 		return response.InternalServerError("Failed to update POS QRIS data", nil)
@@ -142,10 +122,10 @@ func (r *transactionRepository) UpdatePosQrisData(tx *sqlx.Tx, id int, qrString 
 	return nil
 }
 
-func (r *transactionRepository) InsertTdTransaction(tx *sqlx.Tx, transactionId int, createdBy int64, data Data) error {
+func (r *transactionRepository) InsertTdTransaction(ctx context.Context, tx *sqlx.Tx, transactionId int, createdBy int64, data Data) error {
 	query := `INSERT INTO td_user_checkouts (ref_id, menu_id, qty, price, total_price, notes, created_by) VALUES ($1, $2, $3, $4, $5, $6, $7)`
 
-	_, err := tx.Exec(query, transactionId, data.MenuID, data.Qty, data.Price, data.Total, data.Notes, createdBy)
+	_, err := tx.ExecContext(ctx, query, transactionId, data.MenuID, data.Qty, data.Price, data.Total, data.Notes, createdBy)
 	if err != nil {
 		slog.Error("Failed to insert transaction detail", "error", err)
 		return response.InternalServerError("Failed to insert transaction detail", nil)
@@ -153,7 +133,7 @@ func (r *transactionRepository) InsertTdTransaction(tx *sqlx.Tx, transactionId i
 	return nil
 }
 
-func (r *transactionRepository) GetListTransactionsPagination(params common.ParamsListRequest, startDate string, endDate string) (*response.Pagination[[]TransactionResponse], error) {
+func (r *transactionRepository) GetListTransactionsPagination(ctx context.Context, params common.ParamsListRequest, startDate string, endDate string) (*response.Pagination[[]TransactionResponse], error) {
 	var record = make([]TransactionResponse, 0)
 
 	common.BuildMappingField(&params, &mappingFieds)
@@ -166,7 +146,7 @@ func (r *transactionRepository) GetListTransactionsPagination(params common.Para
 	args["start_date"] = startDate
 	args["end_date"] = endDate
 
-	rows, err := r.db.NamedQuery(finalQuery, args)
+	rows, err := r.db.NamedQueryContext(ctx, finalQuery, args)
 
 	if err != nil {
 		slog.Error("Failed to get list transaction", "error", err)
@@ -202,7 +182,7 @@ func (r *transactionRepository) GetListTransactionsPagination(params common.Para
 	countArgs["start_date"] = startDate
 	countArgs["end_date"] = endDate
 
-	countStmt, err := r.db.PrepareNamed(countFinalQuery)
+	countStmt, err := r.db.PrepareNamedContext(ctx, countFinalQuery)
 
 	if err != nil {
 		slog.Error("Failed to prepare count query", "error", err)
@@ -217,7 +197,7 @@ func (r *transactionRepository) GetListTransactionsPagination(params common.Para
 		}
 	}(countStmt)
 
-	if err := countStmt.Get(&totalData, countArgs); err != nil {
+	if err := countStmt.GetContext(ctx, &totalData, countArgs); err != nil {
 		slog.Error("Failed to get total data", "error", err)
 		return nil, response.InternalServerError("Failed to get list transaction count", nil)
 	}
@@ -234,7 +214,7 @@ func (r *transactionRepository) GetListTransactionsPagination(params common.Para
 	return &pagination, nil
 }
 
-func (r *transactionRepository) GetListTransactionsNoPagination(request common.ParamsListRequest, startDate string, endDate string) ([]TransactionResponse, error) {
+func (r *transactionRepository) GetListTransactionsNoPagination(ctx context.Context, request common.ParamsListRequest, startDate string, endDate string) ([]TransactionResponse, error) {
 	var record = make([]TransactionResponse, 0)
 
 	common.BuildMappingField(&request, &mappingFieds)
@@ -250,7 +230,7 @@ func (r *transactionRepository) GetListTransactionsNoPagination(request common.P
 	args["start_date"] = startDate
 	args["end_date"] = endDate
 
-	rows, err := r.db.NamedQuery(finalQuery, args)
+	rows, err := r.db.NamedQueryContext(ctx, finalQuery, args)
 	if err != nil {
 		slog.Error("Failed to get list transaction", "error", err)
 		return nil, response.InternalServerError("Failed to get list transaction", nil)
@@ -275,11 +255,11 @@ func (r *transactionRepository) GetListTransactionsNoPagination(request common.P
 	return record, nil
 }
 
-func (r *transactionRepository) GetOneTransaction(id int) (*TransactionResponse, error) {
+func (r *transactionRepository) GetOneTransaction(ctx context.Context, id int) (*TransactionResponse, error) {
 	var record TransactionResponse
 	query := baseQuery + " WHERE t.id = $1 GROUP BY t.id "
 
-	err := r.db.Get(&record, query, id)
+	err := r.db.GetContext(ctx, &record, query, id)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, response.NotFound("Transaction not found", nil)
@@ -291,7 +271,7 @@ func (r *transactionRepository) GetOneTransaction(id int) (*TransactionResponse,
 	return &record, nil
 }
 
-func (r *transactionRepository) GetListTransactionsByUserId(params common.ParamsListRequest, userId int64) (*response.Pagination[[]TransactionResponse], error) {
+func (r *transactionRepository) GetListTransactionsByUserId(ctx context.Context, params common.ParamsListRequest, userId int64) (*response.Pagination[[]TransactionResponse], error) {
 	var record = make([]TransactionResponse, 0)
 
 	common.BuildMappingField(&params, &mappingFieds)
@@ -300,7 +280,7 @@ func (r *transactionRepository) GetListTransactionsByUserId(params common.Params
 
 	args["user_id"] = userId
 
-	rows, err := r.db.NamedQuery(finalQuery, args)
+	rows, err := r.db.NamedQueryContext(ctx, finalQuery, args)
 
 	if err != nil {
 		slog.Error("Failed to get list transaction", "error", err)
@@ -328,7 +308,7 @@ func (r *transactionRepository) GetListTransactionsByUserId(params common.Params
 
 	countArgs["user_id"] = userId
 
-	countStmt, err := r.db.PrepareNamed(countFinalQuery)
+	countStmt, err := r.db.PrepareNamedContext(ctx, countFinalQuery)
 
 	if err != nil {
 		slog.Error("Failed to prepare count query", "error", err)
@@ -343,7 +323,7 @@ func (r *transactionRepository) GetListTransactionsByUserId(params common.Params
 		}
 	}(countStmt)
 
-	if err := countStmt.Get(&totalData, countArgs); err != nil {
+	if err := countStmt.GetContext(ctx, &totalData, countArgs); err != nil {
 		slog.Error("Failed to get total data", "error", err)
 		return nil, response.InternalServerError("Failed to get list transaction count", nil)
 	}
@@ -361,11 +341,11 @@ func (r *transactionRepository) GetListTransactionsByUserId(params common.Params
 
 }
 
-func (r *transactionRepository) GetOneTransactionByUserId(id int, userId int64) (*TransactionResponse, error) {
+func (r *transactionRepository) GetOneTransactionByUserId(ctx context.Context, id int, userId int64) (*TransactionResponse, error) {
 	var record TransactionResponse
 	query := baseQuery + " WHERE t.id = $1 AND t.user_id = $2 GROUP BY t.id "
 
-	err := r.db.Get(&record, query, id, userId)
+	err := r.db.GetContext(ctx, &record, query, id, userId)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, response.NotFound("Transaction not found", nil)
@@ -377,10 +357,10 @@ func (r *transactionRepository) GetOneTransactionByUserId(id int, userId int64) 
 	return &record, nil
 }
 
-func (r *transactionRepository) UpdateOrderStatus(tx *sqlx.Tx, id int, updatedBy int64) error {
+func (r *transactionRepository) UpdateOrderStatus(ctx context.Context, tx *sqlx.Tx, id int, updatedBy int64) error {
 	query := `UPDATE th_user_checkouts SET order_status = order_status +1, updated_by = $1 WHERE id = $2 AND order_status  < 2`
 
-	result, err := tx.Exec(query, updatedBy, id)
+	result, err := tx.ExecContext(ctx, query, updatedBy, id)
 
 	if err != nil {
 		slog.Error("Failed to update order status", "error", err)
@@ -396,7 +376,7 @@ func (r *transactionRepository) UpdateOrderStatus(tx *sqlx.Tx, id int, updatedBy
 	return nil
 }
 
-func (r *transactionRepository) SetRatingMenu(tx *sqlx.Tx, id int, rating int, updatedBy int64) (int, error) {
+func (r *transactionRepository) SetRatingMenu(ctx context.Context, tx *sqlx.Tx, id int, rating int, updatedBy int64) (int, error) {
 	query := `UPDATE td_user_checkouts td
 		SET rating = $1, updated_by = $2
 		FROM th_user_checkouts th
@@ -406,7 +386,7 @@ func (r *transactionRepository) SetRatingMenu(tx *sqlx.Tx, id int, rating int, u
 
 	var menuId int
 
-	err := tx.QueryRow(query, rating, updatedBy, id).Scan(&menuId)
+	err := tx.QueryRowxContext(ctx, query, rating, updatedBy, id).Scan(&menuId)
 
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -419,7 +399,7 @@ func (r *transactionRepository) SetRatingMenu(tx *sqlx.Tx, id int, rating int, u
 	return menuId, nil
 }
 
-func (r *transactionRepository) SummaryReportTransactions(startDate string, endDate string) (*SummaryReportData, error) {
+func (r *transactionRepository) SummaryReportTransactions(ctx context.Context, startDate string, endDate string) (*SummaryReportData, error) {
 	result := &SummaryReportData{
 		DailyData:       make([]SummaryReport, 0),
 		StatusBreakdown: make([]OrderStatusBreakdown, 0),
@@ -435,7 +415,7 @@ func (r *transactionRepository) SummaryReportTransactions(startDate string, endD
 		GROUP BY CAST(t.created_at AS DATE)
 		ORDER BY created_at ASC`
 
-	err := r.db.Select(&result.DailyData, queryDaily, startDate, endDate)
+	err := r.db.SelectContext(ctx, &result.DailyData, queryDaily, startDate, endDate)
 	if err != nil {
 		slog.Error("Failed to get daily summary report", "error", err)
 		return nil, response.InternalServerError("Failed to get summary report", nil)
@@ -448,7 +428,7 @@ func (r *transactionRepository) SummaryReportTransactions(startDate string, endD
 		WHERE CAST(created_at AS DATE) BETWEEN $1 AND $2
 		GROUP BY order_status`
 
-	err = r.db.Select(&result.StatusBreakdown, queryStatus, startDate, endDate)
+	err = r.db.SelectContext(ctx, &result.StatusBreakdown, queryStatus, startDate, endDate)
 	if err != nil {
 		slog.Error("Failed to get status breakdown report", "error", err)
 	}
@@ -461,7 +441,7 @@ func (r *transactionRepository) SummaryReportTransactions(startDate string, endD
 		GROUP BY EXTRACT(HOUR FROM created_at)
 		ORDER BY hour ASC`
 
-	err = r.db.Select(&result.PeakHours, queryPeak, startDate, endDate)
+	err = r.db.SelectContext(ctx, &result.PeakHours, queryPeak, startDate, endDate)
 	if err != nil {
 		slog.Error("Failed to get peak hours report", "error", err)
 	}
@@ -476,7 +456,7 @@ func (r *transactionRepository) SummaryReportTransactions(startDate string, endD
 		ORDER BY total_qty DESC
 		LIMIT 5`
 
-	err = r.db.Select(&result.TopMenus, queryTopMenus, startDate, endDate)
+	err = r.db.SelectContext(ctx, &result.TopMenus, queryTopMenus, startDate, endDate)
 	if err != nil {
 		slog.Error("Failed to get top menus report", "error", err)
 	}
@@ -495,7 +475,7 @@ func validateAffectedRows(info sql.Result, message string) error {
 	return nil
 }
 
-func (r *transactionRepository) InsertTdTransactionBatch(tx *sqlx.Tx, transactionId int, createdBy int64, datas []Data) error {
+func (r *transactionRepository) InsertTdTransactionBatch(ctx context.Context, tx *sqlx.Tx, transactionId int, createdBy int64, datas []Data) error {
 	if len(datas) == 0 {
 		return nil
 	}
@@ -512,12 +492,7 @@ func (r *transactionRepository) InsertTdTransactionBatch(tx *sqlx.Tx, transactio
 
 	query := fmt.Sprintf("INSERT INTO td_user_checkouts (ref_id, menu_id, qty, price, total_price, notes, created_by) VALUES %s", strings.Join(valueStrings, ", "))
 
-	var err error
-	if tx != nil {
-		_, err = tx.Exec(query, valueArgs...)
-	} else {
-		_, err = r.db.Exec(query, valueArgs...)
-	}
+	_, err := tx.ExecContext(ctx, query, valueArgs...)
 	if err != nil {
 		slog.Error("Failed to bulk insert transaction details", "error", err)
 		return response.InternalServerError("Failed to bulk insert transaction details", nil)
@@ -525,17 +500,12 @@ func (r *transactionRepository) InsertTdTransactionBatch(tx *sqlx.Tx, transactio
 	return nil
 }
 
-func (r *transactionRepository) LogPromotionUsage(tx *sqlx.Tx, transactionId int64, promotionId int64, menuId int64, userId int64, qty int, discountAmount float64) error {
+func (r *transactionRepository) LogPromotionUsage(ctx context.Context, tx *sqlx.Tx, transactionId int64, promotionId int64, menuId int64, userId int64, qty int, discountAmount float64) error {
 	query := `
 		INSERT INTO tr_promotion_usages (transaction_id, promotion_id, menu_id, user_id, qty, discount_amount)
 		VALUES ($1, $2, $3, $4, $5, $6)
 	`
-	var err error
-	if tx != nil {
-		_, err = tx.Exec(query, transactionId, promotionId, menuId, userId, qty, discountAmount)
-	} else {
-		_, err = r.db.Exec(query, transactionId, promotionId, menuId, userId, qty, discountAmount)
-	}
+	_, err := tx.ExecContext(ctx, query, transactionId, promotionId, menuId, userId, qty, discountAmount)
 	if err != nil {
 		slog.Error("Failed to log promotion usage", "error", err)
 		return response.InternalServerError("Failed to log promotion usage", nil)
@@ -543,7 +513,7 @@ func (r *transactionRepository) LogPromotionUsage(tx *sqlx.Tx, transactionId int
 	return nil
 }
 
-func (r *transactionRepository) LogPromotionUsageBatch(tx *sqlx.Tx, usages []PromotionUsageLog) error {
+func (r *transactionRepository) LogPromotionUsageBatch(ctx context.Context, tx *sqlx.Tx, usages []PromotionUsageLog) error {
 	if len(usages) == 0 {
 		return nil
 	}
@@ -560,15 +530,11 @@ func (r *transactionRepository) LogPromotionUsageBatch(tx *sqlx.Tx, usages []Pro
 
 	query := fmt.Sprintf("INSERT INTO tr_promotion_usages (transaction_id, promotion_id, menu_id, user_id, qty, discount_amount) VALUES %s", strings.Join(valueStrings, ", "))
 
-	var err error
-	if tx != nil {
-		_, err = tx.Exec(query, valueArgs...)
-	} else {
-		_, err = r.db.Exec(query, valueArgs...)
-	}
+	_, err := tx.ExecContext(ctx, query, valueArgs...)
 	if err != nil {
 		slog.Error("Failed to bulk insert promotion usages", "error", err)
 		return response.InternalServerError("Failed to bulk insert promotion usages", nil)
 	}
 	return nil
 }
+

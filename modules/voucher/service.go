@@ -1,6 +1,7 @@
 package voucher
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,14 +18,14 @@ import (
 )
 
 type Service interface {
-	ValidateVoucher(request ValidateVoucherRequest, userId int64) (*ValidateVoucherResponse, error)
-	ValidateVoucherForCheckout(tx *sqlx.Tx, code string, orderTotal float64, userId int64) (int64, float64, error)
-	LogVoucherUsage(tx *sqlx.Tx, userId int64, voucherId int64, checkoutId int64, discountAmount float64) error
-	DeactivateVoucher(tx *sqlx.Tx, id int64) error
-	CreateVoucher(tx *sqlx.Tx, request CreateVoucherRequest) (int64, error)
-	GetListVouchers(params common.ParamsListRequest, isPublicOnly bool, userId int64) (*response.Pagination[[]Voucher], error)
-	DeleteVoucher(tx *sqlx.Tx, id int64) error
-	UpdateVoucherStatus(tx *sqlx.Tx, id int64, isActive *bool, isPublic *bool) error
+	ValidateVoucher(ctx context.Context, request ValidateVoucherRequest, userId int64) (*ValidateVoucherResponse, error)
+	ValidateVoucherForCheckout(ctx context.Context, tx *sqlx.Tx, code string, orderTotal float64, userId int64) (int64, float64, error)
+	LogVoucherUsage(ctx context.Context, tx *sqlx.Tx, userId int64, voucherId int64, checkoutId int64, discountAmount float64) error
+	DeactivateVoucher(ctx context.Context, tx *sqlx.Tx, id int64) error
+	CreateVoucher(ctx context.Context, tx *sqlx.Tx, request CreateVoucherRequest) (int64, error)
+	GetListVouchers(ctx context.Context, params common.ParamsListRequest, isPublicOnly bool, userId int64) (*response.Pagination[[]Voucher], error)
+	DeleteVoucher(ctx context.Context, tx *sqlx.Tx, id int64) error
+	UpdateVoucherStatus(ctx context.Context, tx *sqlx.Tx, id int64, isActive *bool, isPublic *bool) error
 }
 
 type voucherService struct {
@@ -36,8 +37,8 @@ func NewVoucherService(repo Repository, db *sqlx.DB) Service {
 	return &voucherService{repo: repo, db: db}
 }
 
-func (s *voucherService) ValidateVoucher(request ValidateVoucherRequest, userId int64) (*ValidateVoucherResponse, error) {
-	voucher, err := s.repo.GetVoucherByCode(nil, request.Code)
+func (s *voucherService) ValidateVoucher(ctx context.Context, request ValidateVoucherRequest, userId int64) (*ValidateVoucherResponse, error) {
+	voucher, err := s.repo.GetVoucherByCode(ctx, nil, request.Code)
 	if err != nil {
 		var appErr *response.AppError
 		if errors.As(err, &appErr) && appErr.Code == http.StatusNotFound {
@@ -53,7 +54,7 @@ func (s *voucherService) ValidateVoucher(request ValidateVoucherRequest, userId 
 		}, nil
 	}
 
-	usageCount, err := s.repo.CheckUserVoucherUsage(nil, userId, voucher.ID)
+	usageCount, err := s.repo.CheckUserVoucherUsage(ctx, nil, userId, voucher.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -97,8 +98,8 @@ func (s *voucherService) ValidateVoucher(request ValidateVoucherRequest, userId 
 	}, nil
 }
 
-func (s *voucherService) ValidateVoucherForCheckout(tx *sqlx.Tx, code string, orderTotal float64, userId int64) (int64, float64, error) {
-	voucher, err := s.repo.GetVoucherByCode(tx, code)
+func (s *voucherService) ValidateVoucherForCheckout(ctx context.Context, tx *sqlx.Tx, code string, orderTotal float64, userId int64) (int64, float64, error) {
+	voucher, err := s.repo.GetVoucherByCode(ctx, tx, code)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -107,7 +108,7 @@ func (s *voucherService) ValidateVoucherForCheckout(tx *sqlx.Tx, code string, or
 		return 0, 0, response.BadRequest(fmt.Sprintf("Minimum purchase of %s is not met for voucher %s", formatRupiah(voucher.MinPurchase), voucher.Code), nil)
 	}
 
-	usageCount, err := s.repo.CheckUserVoucherUsage(tx, userId, voucher.ID)
+	usageCount, err := s.repo.CheckUserVoucherUsage(ctx, tx, userId, voucher.ID)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -136,24 +137,24 @@ func (s *voucherService) ValidateVoucherForCheckout(tx *sqlx.Tx, code string, or
 	return voucher.ID, discountAmount, nil
 }
 
-func (s *voucherService) LogVoucherUsage(tx *sqlx.Tx, userId int64, voucherId int64, checkoutId int64, discountAmount float64) error {
-	err := s.repo.InsertVoucherUsage(tx, userId, voucherId, checkoutId, discountAmount)
+func (s *voucherService) LogVoucherUsage(ctx context.Context, tx *sqlx.Tx, userId int64, voucherId int64, checkoutId int64, discountAmount float64) error {
+	err := s.repo.InsertVoucherUsage(ctx, tx, userId, voucherId, checkoutId, discountAmount)
 	if err != nil {
 		return err
 	}
-	return s.repo.DecrementVoucherQuota(tx, voucherId)
+	return s.repo.DecrementVoucherQuota(ctx, tx, voucherId)
 }
 
-func (s *voucherService) DeactivateVoucher(tx *sqlx.Tx, id int64) error {
-	return s.repo.DeactivateVoucher(tx, id)
+func (s *voucherService) DeactivateVoucher(ctx context.Context, tx *sqlx.Tx, id int64) error {
+	return s.repo.DeactivateVoucher(ctx, tx, id)
 }
 
-func (s *voucherService) CreateVoucher(tx *sqlx.Tx, request CreateVoucherRequest) (int64, error) {
+func (s *voucherService) CreateVoucher(ctx context.Context, tx *sqlx.Tx, request CreateVoucherRequest) (int64, error) {
 	if request.DiscountType == "PERCENTAGE" && request.DiscountValue > 100 {
 		return 0, response.BadRequest("Percentage discount value cannot exceed 100%", nil)
 	}
 
-	id, err := s.repo.InsertVoucher(tx, request)
+	id, err := s.repo.InsertVoucher(ctx, tx, request)
 	if err != nil {
 		return 0, err
 	}
@@ -187,16 +188,16 @@ func (s *voucherService) CreateVoucher(tx *sqlx.Tx, request CreateVoucherRequest
 	return id, nil
 }
 
-func (s *voucherService) GetListVouchers(params common.ParamsListRequest, isPublicOnly bool, userId int64) (*response.Pagination[[]Voucher], error) {
-	return s.repo.ListVouchers(params, isPublicOnly, userId)
+func (s *voucherService) GetListVouchers(ctx context.Context, params common.ParamsListRequest, isPublicOnly bool, userId int64) (*response.Pagination[[]Voucher], error) {
+	return s.repo.ListVouchers(ctx, params, isPublicOnly, userId)
 }
 
-func (s *voucherService) DeleteVoucher(tx *sqlx.Tx, id int64) error {
-	return s.repo.DeleteVoucherByID(tx, id)
+func (s *voucherService) DeleteVoucher(ctx context.Context, tx *sqlx.Tx, id int64) error {
+	return s.repo.DeleteVoucherByID(ctx, tx, id)
 }
 
-func (s *voucherService) UpdateVoucherStatus(tx *sqlx.Tx, id int64, isActive *bool, isPublic *bool) error {
-	return s.repo.UpdateVoucherStatus(tx, id, isActive, isPublic)
+func (s *voucherService) UpdateVoucherStatus(ctx context.Context, tx *sqlx.Tx, id int64, isActive *bool, isPublic *bool) error {
+	return s.repo.UpdateVoucherStatus(ctx, tx, id, isActive, isPublic)
 }
 
 func parseTime(tStr string) (time.Time, error) {

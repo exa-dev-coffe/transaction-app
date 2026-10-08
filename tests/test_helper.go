@@ -318,7 +318,7 @@ func SetupTestApp(dbConn *sqlx.DB) *fiber.App {
 	// Real Handlers & Services! (No Mocks!)
 	voucherRepo := voucher.NewVoucherRepository(dbConn)
 	voucherService := voucher.NewVoucherService(voucherRepo, dbConn)
-	voucher.NewHandler(app, voucherService)
+	voucher.NewHandler(app, voucherService, dbConn)
 
 	transactionRepo := transaction.NewTransactionRepository(dbConn)
 	transactionService := transaction.NewTransactionService(transactionRepo, voucherService, dbConn)

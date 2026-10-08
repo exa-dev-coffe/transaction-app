@@ -10,6 +10,7 @@ import (
 	"eka-dev.cloud/transaction-service/utils/common"
 	"eka-dev.cloud/transaction-service/utils/response"
 	"github.com/gofiber/fiber/v2"
+	"github.com/jmoiron/sqlx"
 )
 
 type Handler interface {
@@ -23,10 +24,11 @@ type Handler interface {
 
 type handler struct {
 	service Service
+	db      *sqlx.DB
 }
 
-func NewHandler(app *fiber.App, service Service) Handler {
-	h := &handler{service: service}
+func NewHandler(app *fiber.App, service Service, db *sqlx.DB) Handler {
+	h := &handler{service: service, db: db}
 
 	routes := app.Group("/api/1.0")
 
@@ -62,7 +64,8 @@ func (h *handler) ValidateVoucher(c *fiber.Ctx) error {
 		return err
 	}
 
-	res, err := h.service.ValidateVoucher(request, claims.UserId)
+	ctx := c.UserContext()
+	res, err := h.service.ValidateVoucher(ctx, request, claims.UserId)
 	if err != nil {
 		return err
 	}
@@ -84,7 +87,10 @@ func (h *handler) DeactivateVoucher(c *fiber.Ctx) error {
 		return err
 	}
 
-	err = h.service.DeactivateVoucher(nil, request.ID)
+	ctx := c.UserContext()
+	err = common.WithTransactionContext[int64](ctx, h.db, func(tx *sqlx.Tx, id int64) error {
+		return h.service.DeactivateVoucher(ctx, tx, id)
+	}, request.ID)
 	if err != nil {
 		return err
 	}
@@ -110,7 +116,10 @@ func (h *handler) CreateVoucher(c *fiber.Ctx) error {
 	}
 	request.CreatedBy = claims.UserId
 
-	id, err := h.service.CreateVoucher(nil, request)
+	ctx := c.UserContext()
+	id, err := common.WithTransactionReturnContext[CreateVoucherRequest, int64](ctx, h.db, func(tx *sqlx.Tx, req CreateVoucherRequest) (int64, error) {
+		return h.service.CreateVoucher(ctx, tx, req)
+	}, request)
 	if err != nil {
 		return err
 	}
@@ -140,7 +149,8 @@ func (h *handler) GetListVouchers(c *fiber.Ctx) error {
 	// For regular customer users (who don't have voucher management permission), isPublicOnly is strictly forced to TRUE at SQL level!
 	isPublicOnly := !canViewAllVouchers(claims)
 
-	res, err := h.service.GetListVouchers(paramsListRequest, isPublicOnly, claims.UserId)
+	ctx := c.UserContext()
+	res, err := h.service.GetListVouchers(ctx, paramsListRequest, isPublicOnly, claims.UserId)
 	if err != nil {
 		return err
 	}
@@ -174,7 +184,10 @@ func (h *handler) DeleteVoucher(c *fiber.Ctx) error {
 		return response.BadRequest("Invalid voucher ID", nil)
 	}
 
-	err = h.service.DeleteVoucher(nil, id)
+	ctx := c.UserContext()
+	err = common.WithTransactionContext(ctx, h.db, func(tx *sqlx.Tx, voucherID int64) error {
+		return h.service.DeleteVoucher(ctx, tx, voucherID)
+	}, id)
 	if err != nil {
 		return err
 	}
@@ -196,7 +209,10 @@ func (h *handler) UpdateVoucherStatus(c *fiber.Ctx) error {
 		return response.BadRequest("Invalid request body", nil)
 	}
 
-	err = h.service.UpdateVoucherStatus(nil, id, request.IsActive, request.IsPublic)
+	ctx := c.UserContext()
+	err = common.WithTransactionContext(ctx, h.db, func(tx *sqlx.Tx, req UpdateVoucherStatusRequest) error {
+		return h.service.UpdateVoucherStatus(ctx, tx, id, req.IsActive, req.IsPublic)
+	}, request)
 	if err != nil {
 		return err
 	}

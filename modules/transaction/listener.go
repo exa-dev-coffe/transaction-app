@@ -1,8 +1,10 @@
 package transaction
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
+	"time"
 
 	"eka-dev.cloud/transaction-service/lib"
 	"eka-dev.cloud/transaction-service/utils/response"
@@ -45,7 +47,10 @@ func (l *transactionListener) ListenPosQrisSettlement() error {
 				return response.InternalServerError("Failed to parse message body", nil)
 			}
 
-			_, err := l.service.SettlePosQrisPayment(req.OrderRef, req.PaymentStatus)
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+
+			_, err := l.service.SettlePosQrisPayment(ctx, req.OrderRef, req.PaymentStatus)
 			if err != nil {
 				slog.Error("Failed to settle POS QRIS payment", "error", err)
 				return err

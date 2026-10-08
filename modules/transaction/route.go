@@ -67,7 +67,8 @@ func (h *handler) SyncPosQrisStatus(c *fiber.Ctx) error {
 		return response.BadRequest("Invalid transaction id", nil)
 	}
 
-	res, err := h.service.SyncPosQrisStatus(id)
+	ctx := c.UserContext()
+	res, err := h.service.SyncPosQrisStatus(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -97,9 +98,10 @@ func (h *handler) ChangePosPaymentMethod(c *fiber.Ctx) error {
 		request.UpdatedBy = claims.UserId
 	}
 
+	ctx := c.UserContext()
 	var result *TransactionResponse
-	err = common.WithTransaction[ChangePosPaymentMethodRequest](h.db, func(tx *sqlx.Tx, req ChangePosPaymentMethodRequest) error {
-		res, err := h.service.ChangePosPaymentMethod(tx, id, req)
+	err = common.WithTransactionContext[ChangePosPaymentMethodRequest](ctx, h.db, func(tx *sqlx.Tx, req ChangePosPaymentMethodRequest) error {
+		res, err := h.service.ChangePosPaymentMethod(ctx, tx, id, req)
 		if err != nil {
 			return err
 		}
@@ -132,9 +134,10 @@ func (h *handler) CreatePosTransaction(c *fiber.Ctx) error {
 
 	request.CreatedBy = claims.UserId
 
+	ctx := c.UserContext()
 	var result *TransactionResponse
-	err = common.WithTransaction[CreatePosTransactionRequest](h.db, func(tx *sqlx.Tx, req CreatePosTransactionRequest) error {
-		res, err := h.service.CreatePosTransaction(tx, req)
+	err = common.WithTransactionContext[CreatePosTransactionRequest](ctx, h.db, func(tx *sqlx.Tx, req CreatePosTransactionRequest) error {
+		res, err := h.service.CreatePosTransaction(ctx, tx, req)
 		if err != nil {
 			return err
 		}
@@ -169,7 +172,10 @@ func (h *handler) CreateTransaction(c *fiber.Ctx) error {
 
 	request.CreatedBy = claims.UserId
 
-	err = common.WithTransaction[CreateTransactionRequest](h.db, h.service.CreateTransaction, request)
+	ctx := c.UserContext()
+	err = common.WithTransactionContext[CreateTransactionRequest](ctx, h.db, func(tx *sqlx.Tx, req CreateTransactionRequest) error {
+		return h.service.CreateTransaction(ctx, tx, req)
+	}, request)
 	if err != nil {
 		return err
 	}
@@ -213,11 +219,12 @@ func (h *handler) GetListTransactions(c *fiber.Ctx) error {
 		return err
 	}
 
+	ctx := c.UserContext()
 	var records interface{}
 	if paramsListRequest.NoPaginate {
-		records, err = h.service.GetListTransactionsNoPagination(request)
+		records, err = h.service.GetListTransactionsNoPagination(ctx, request)
 	} else {
-		records, err = h.service.GetListTransactionsPagination(request)
+		records, err = h.service.GetListTransactionsPagination(ctx, request)
 	}
 
 	if err != nil {
@@ -251,11 +258,12 @@ func (h *handler) GetListPosTransactions(c *fiber.Ctx) error {
 	request.ParamsListRequest.Search.Field = append(request.ParamsListRequest.Search.Field, "isCashier")
 	request.ParamsListRequest.Search.Value = append(request.ParamsListRequest.Search.Value, "true")
 
+	ctx := c.UserContext()
 	var records interface{}
 	if paramsListRequest.NoPaginate {
-		records, err = h.service.GetListTransactionsNoPagination(request)
+		records, err = h.service.GetListTransactionsNoPagination(ctx, request)
 	} else {
-		records, err = h.service.GetListTransactionsPagination(request)
+		records, err = h.service.GetListTransactionsPagination(ctx, request)
 	}
 
 	if err != nil {
@@ -272,7 +280,8 @@ func (h *handler) GetOneTransaction(c *fiber.Ctx) error {
 		return err
 	}
 
-	record, err := h.service.GetOneTransaction(request)
+	ctx := c.UserContext()
+	record, err := h.service.GetOneTransaction(ctx, request)
 	if err != nil {
 		return err
 	}
@@ -298,7 +307,8 @@ func (h *handler) GetListTransactionsByUserId(c *fiber.Ctx) error {
 		return err
 	}
 
-	records, err := h.service.GetListTransactionsByUserId(paramsListRequest, claims.UserId, claims.FullName)
+	ctx := c.UserContext()
+	records, err := h.service.GetListTransactionsByUserId(ctx, paramsListRequest, claims.UserId, claims.FullName)
 	if err != nil {
 		return err
 	}
@@ -318,7 +328,8 @@ func (h *handler) GetOneTransactionByUserId(c *fiber.Ctx) error {
 		return err
 	}
 
-	record, err := h.service.GetOneTransactionByUserId(request, claims.UserId, claims.FullName)
+	ctx := c.UserContext()
+	record, err := h.service.GetOneTransactionByUserId(ctx, request, claims.UserId, claims.FullName)
 	if err != nil {
 		return err
 	}
@@ -347,7 +358,10 @@ func (h *handler) UpdateOrderStatus(c *fiber.Ctx) error {
 
 	request.UpdatedBy = claims.UserId
 
-	err = common.WithTransaction[UpdateOrderStatusRequest](h.db, h.service.UpdateOrderStatus, request)
+	ctx := c.UserContext()
+	err = common.WithTransactionContext[UpdateOrderStatusRequest](ctx, h.db, func(tx *sqlx.Tx, req UpdateOrderStatusRequest) error {
+		return h.service.UpdateOrderStatus(ctx, tx, req)
+	}, request)
 	if err != nil {
 		return err
 	}
@@ -376,7 +390,10 @@ func (h *handler) SetRatingMenu(c *fiber.Ctx) error {
 
 	request.UpdatedBy = claims.UserId
 
-	err = common.WithTransaction[SetRatingMenuRequest](h.db, h.service.SetRatingMenu, request)
+	ctx := c.UserContext()
+	err = common.WithTransactionContext[SetRatingMenuRequest](ctx, h.db, func(tx *sqlx.Tx, req SetRatingMenuRequest) error {
+		return h.service.SetRatingMenu(ctx, tx, req)
+	}, request)
 	if err != nil {
 		return err
 	}
@@ -400,7 +417,8 @@ func (h *handler) SummaryReportTransactions(c *fiber.Ctx) error {
 		return err
 	}
 
-	record, err := h.service.SummaryReportTransactions(request.StartDate, request.EndDate)
+	ctx := c.UserContext()
+	record, err := h.service.SummaryReportTransactions(ctx, request.StartDate, request.EndDate)
 	if err != nil {
 		return err
 	}

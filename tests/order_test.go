@@ -1,6 +1,7 @@
 package tests
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -716,7 +717,7 @@ func TestPosOrderCheckoutSuite(t *testing.T) {
 		txService := transaction.NewTransactionService(txRepo, voucherService, dbConn)
 
 		orderRef := fmt.Sprintf("POS-%d-1724410293000", txId)
-		settledRes, err := txService.SettlePosQrisPayment(orderRef, "PAID")
+		settledRes, err := txService.SettlePosQrisPayment(context.Background(), orderRef, "PAID")
 		if err != nil {
 			t.Fatalf("SettlePosQrisPayment failed: %v", err)
 		}

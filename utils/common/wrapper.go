@@ -1,6 +1,7 @@
 package common
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log/slog"
@@ -228,6 +229,61 @@ func WithTransaction[P any](db *sqlx.DB, fn func(tx *sqlx.Tx, args P) error, arg
 	}
 
 	return nil
+}
+
+func WithTransactionContext[P any](ctx context.Context, db *sqlx.DB, fn func(tx *sqlx.Tx, args P) error, args P) error {
+	tx, err := db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+
+	defer func() {
+		if p := recover(); p != nil {
+			_ = tx.Rollback()
+			panic(p)
+		} else if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	err = fn(tx, args)
+	if err != nil {
+		return err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func WithTransactionReturnContext[P any, R any](ctx context.Context, db *sqlx.DB, fn func(tx *sqlx.Tx, args P) (R, error), args P) (R, error) {
+	var result R
+	tx, err := db.BeginTxx(ctx, nil)
+	if err != nil {
+		return result, err
+	}
+
+	defer func() {
+		if p := recover(); p != nil {
+			_ = tx.Rollback()
+			panic(p)
+		} else if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	result, err = fn(tx, args)
+	if err != nil {
+		return result, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return result, err
+	}
+
+	return result, nil
 }
 
 func GetClaimsFromLocals(c *fiber.Ctx) (*Claims, error) {
