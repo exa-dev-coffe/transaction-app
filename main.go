@@ -73,9 +73,10 @@ func initiator() {
 	})
 
 	fiberApp.Use(cors.New(cors.Config{
-		AllowOrigins: config.Config.AllowedOrigins,
-		AllowHeaders: "Origin, Content-Type, Accept, Authorization, X-Timestamp, X-Signature",
-		AllowMethods: "GET, POST, PUT, DELETE, OPTIONS, PATCH",
+		AllowOrigins:  config.Config.AllowedOrigins,
+		AllowHeaders:  "Origin, Content-Type, Accept, Authorization, X-Timestamp, X-Signature, Idempotency-Key, X-Idempotency-Key",
+		ExposeHeaders: "Idempotent-Replayed, X-Idempotent-Replayed",
+		AllowMethods:  "GET, POST, PUT, DELETE, OPTIONS, PATCH",
 	}))
 
 	// Initialize modules

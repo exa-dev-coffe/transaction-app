@@ -67,6 +67,22 @@ func InternalServerError(message string, data interface{}) *AppError {
 	}
 }
 
+func Conflict(message string, data interface{}) *AppError {
+	if message == "" {
+		return NewAppError(http.StatusConflict, "Conflict", data)
+	} else {
+		return NewAppError(http.StatusConflict, message, data)
+	}
+}
+
+func UnprocessableEntity(message string, data interface{}) *AppError {
+	if message == "" {
+		return NewAppError(http.StatusUnprocessableEntity, "Unprocessable entity", data)
+	} else {
+		return NewAppError(http.StatusUnprocessableEntity, message, data)
+	}
+}
+
 func CustomError(code int, message string, data interface{}) *AppError {
 	return NewAppError(code, message, data)
 }

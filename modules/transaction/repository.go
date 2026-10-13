@@ -53,12 +53,20 @@ func NewTransactionRepository(db *sqlx.DB) Repository {
 
 func (r *transactionRepository) InsertThTransaction(ctx context.Context, tx *sqlx.Tx, transaction CreateTransactionRequest, voucherId *int64, discountAmount float64) (int, error) {
 	var id int
-	query := `INSERT INTO th_user_checkouts (user_id, table_id, order_for, total_price, created_by, voucher_id, discount_amount, order_type, payment_method, payment_status, is_cashier) 
-	          VALUES ($1, $2, $3, $4, $5, $6, $7, 'DINE_IN', 'WALLET', 'PAID', FALSE) RETURNING id`
+	query := `INSERT INTO th_user_checkouts (user_id, table_id, order_for, total_price, created_by, voucher_id, discount_amount, order_type, payment_method, payment_status, is_cashier, idempotency_key) 
+	          VALUES ($1, $2, $3, $4, $5, $6, $7, 'DINE_IN', 'WALLET', 'PAID', FALSE, $8) RETURNING id`
 
-	err := tx.QueryRowxContext(ctx, query, transaction.CreatedBy, transaction.TableId, transaction.OrderFor, transaction.Total, transaction.CreatedBy, voucherId, discountAmount).Scan(&id)
+	var idempotencyKey *string = nil
+	if transaction.IdempotencyKey != "" {
+		idempotencyKey = &transaction.IdempotencyKey
+	}
+
+	err := tx.QueryRowxContext(ctx, query, transaction.CreatedBy, transaction.TableId, transaction.OrderFor, transaction.Total, transaction.CreatedBy, voucherId, discountAmount, idempotencyKey).Scan(&id)
 	if err != nil {
 		slog.Error("Failed to insert transaction", "error", err)
+		if strings.Contains(err.Error(), "idx_th_user_checkouts_idempotency_key") || strings.Contains(err.Error(), "unique constraint") {
+			return 0, response.Conflict("Transaction with this idempotency key already exists", nil)
+		}
 		return 0, response.InternalServerError("Failed to insert transaction", nil)
 	}
 	return id, nil
@@ -66,17 +74,25 @@ func (r *transactionRepository) InsertThTransaction(ctx context.Context, tx *sql
 
 func (r *transactionRepository) InsertThPosTransaction(ctx context.Context, tx *sqlx.Tx, transaction CreatePosTransactionRequest, voucherId *int64, discountAmount float64, paymentStatus string) (int, error) {
 	var id int
-	query := `INSERT INTO th_user_checkouts (user_id, table_id, order_for, total_price, created_by, voucher_id, discount_amount, order_type, payment_method, payment_status, cash_amount, cash_change, is_cashier) 
-	          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, TRUE) RETURNING id`
+	query := `INSERT INTO th_user_checkouts (user_id, table_id, order_for, total_price, created_by, voucher_id, discount_amount, order_type, payment_method, payment_status, cash_amount, cash_change, is_cashier, idempotency_key) 
+	          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, TRUE, $13) RETURNING id`
 
 	var tableId *int64 = nil
 	if transaction.TableId != nil && *transaction.TableId > 0 {
 		tableId = transaction.TableId
 	}
 
-	err := tx.QueryRowxContext(ctx, query, transaction.CreatedBy, tableId, transaction.OrderFor, transaction.Total, transaction.CreatedBy, voucherId, discountAmount, transaction.OrderType, transaction.PaymentMethod, paymentStatus, transaction.CashAmount, transaction.CashChange).Scan(&id)
+	var idempotencyKey *string = nil
+	if transaction.IdempotencyKey != "" {
+		idempotencyKey = &transaction.IdempotencyKey
+	}
+
+	err := tx.QueryRowxContext(ctx, query, transaction.CreatedBy, tableId, transaction.OrderFor, transaction.Total, transaction.CreatedBy, voucherId, discountAmount, transaction.OrderType, transaction.PaymentMethod, paymentStatus, transaction.CashAmount, transaction.CashChange, idempotencyKey).Scan(&id)
 	if err != nil {
 		slog.Error("Failed to insert POS transaction", "error", err)
+		if strings.Contains(err.Error(), "idx_th_user_checkouts_idempotency_key") || strings.Contains(err.Error(), "unique constraint") {
+			return 0, response.Conflict("POS transaction with this idempotency key already exists", nil)
+		}
 		return 0, response.InternalServerError("Failed to insert POS transaction", nil)
 	}
 	return id, nil

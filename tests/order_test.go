@@ -138,6 +138,62 @@ func TestOrderCheckoutSuite(t *testing.T) {
 		}
 	})
 
+	t.Run("POST /checkout - Idempotency Replay & Deduplication", func(t *testing.T) {
+		idempotencyKey := "idem-order-key-001"
+		body := []byte(`{
+			"tableId": 3,
+			"orderFor": "Dine In Idempotent",
+			"pin": "123456",
+			"datas": [{"menuId": 10, "qty": 1, "price": 25000.00, "total": 25000.00}],
+			"total": 25000.00
+		}`)
+		headers := map[string]string{
+			"Idempotency-Key": idempotencyKey,
+		}
+
+		// First request
+		resp1, err := ExecuteTestRequestWithHeaders(app, "POST", "/api/1.0/checkout", body, customerToken, headers)
+		if err != nil {
+			t.Fatalf("First request failed: %v", err)
+		}
+		if resp1.StatusCode != 201 {
+			respBody, _ := io.ReadAll(resp1.Body)
+			t.Fatalf("Expected HTTP 201 Created on first attempt, got %v: %s", resp1.StatusCode, string(respBody))
+		}
+		if resp1.Header.Get("Idempotent-Replayed") == "true" {
+			t.Errorf("First request should not be marked as replayed")
+		}
+
+		// Duplicate request with SAME key and SAME body
+		resp2, err := ExecuteTestRequestWithHeaders(app, "POST", "/api/1.0/checkout", body, customerToken, headers)
+		if err != nil {
+			t.Fatalf("Duplicate request failed: %v", err)
+		}
+		if resp2.StatusCode != 201 {
+			respBody, _ := io.ReadAll(resp2.Body)
+			t.Fatalf("Expected HTTP 201 Created on replayed attempt, got %v: %s", resp2.StatusCode, string(respBody))
+		}
+		if resp2.Header.Get("Idempotent-Replayed") != "true" {
+			t.Errorf("Expected Idempotent-Replayed header to be 'true'")
+		}
+
+		// Verify duplicate request with SAME key but DIFFERENT body returns 422
+		differentBody := []byte(`{
+			"tableId": 3,
+			"orderFor": "Dine In Changed",
+			"pin": "123456",
+			"datas": [{"menuId": 10, "qty": 3, "price": 25000.00, "total": 75000.00}],
+			"total": 75000.00
+		}`)
+		resp3, err := ExecuteTestRequestWithHeaders(app, "POST", "/api/1.0/checkout", differentBody, customerToken, headers)
+		if err != nil {
+			t.Fatalf("Different payload request failed: %v", err)
+		}
+		if resp3.StatusCode != 422 {
+			t.Errorf("Expected HTTP 422 Unprocessable Entity, got %d", resp3.StatusCode)
+		}
+	})
+
 	t.Run("GET /transactions - Admin Get List Transactions", func(t *testing.T) {
 		resp, err := ExecuteTestRequest(app, "GET", "/api/1.0/transactions?page=1&size=10", nil, adminToken)
 		if err != nil {

@@ -15,6 +15,7 @@ Transaction Service is the core orchestration service built with **Go** and **Fi
 ## 📦 Features
 
 *   **Order Creation**: Orchestrates cart checkout by fetching menu data and communicating with Wallet Service for payments.
+*   **Idempotency Key Support**: Protects `/checkout` and `/pos/checkout` against network duplicate requests, double-charging, and race conditions via Redis atomic locks, response caching (`Idempotency-Key`), and database unique constraints.
 *   **HMAC Security**: Generates and signs payloads using HMAC to securely call internal APIs (Account, Wallet, Master Data).
 *   **Transaction History**: Provides detailed transaction and order history to the user.
 *   **Event Publisher**: Dispatches events (e.g., `menu.set_rating`) to RabbitMQ for workers to process.

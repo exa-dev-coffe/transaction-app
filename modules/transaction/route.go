@@ -2,6 +2,7 @@ package transaction
 
 import (
 	"log/slog"
+	"strings"
 
 	"eka-dev.cloud/transaction-service/lib"
 	"eka-dev.cloud/transaction-service/middleware"
@@ -36,8 +37,8 @@ func NewHandler(app *fiber.App, service Service, db *sqlx.DB) Handler {
 	h := &handler{service: service, db: db}
 
 	routes := app.Group("/api/1.0")
-	routes.Post("/checkout", middleware.RequireAuth, h.CreateTransaction)
-	routes.Post("/pos/checkout", middleware.RequirePermission("pos", "create"), h.CreatePosTransaction)
+	routes.Post("/checkout", middleware.RequireAuth, middleware.Idempotency(), h.CreateTransaction)
+	routes.Post("/pos/checkout", middleware.RequirePermission("pos", "create"), middleware.Idempotency(), h.CreatePosTransaction)
 	routes.Patch("/pos/transactions/:id/change-payment", middleware.RequirePermission("pos", "create"), h.ChangePosPaymentMethod)
 	routes.Post("/pos/transactions/:id/sync-midtrans", middleware.RequirePermission("pos", "view"), h.SyncPosQrisStatus)
 	routes.Get("/pos/transactions", middleware.RequirePermission("pos", "view"), h.GetListPosTransactions)
@@ -134,6 +135,14 @@ func (h *handler) CreatePosTransaction(c *fiber.Ctx) error {
 
 	request.CreatedBy = claims.UserId
 
+	idempotencyKey := strings.TrimSpace(c.Get(middleware.HeaderIdempotencyKey))
+	if idempotencyKey == "" {
+		idempotencyKey = strings.TrimSpace(c.Get(middleware.HeaderXIdempotencyKey))
+	}
+	if idempotencyKey != "" {
+		request.IdempotencyKey = idempotencyKey
+	}
+
 	ctx := c.UserContext()
 	var result *TransactionResponse
 	err = common.WithTransactionContext[CreatePosTransactionRequest](ctx, h.db, func(tx *sqlx.Tx, req CreatePosTransactionRequest) error {
@@ -171,6 +180,14 @@ func (h *handler) CreateTransaction(c *fiber.Ctx) error {
 	}
 
 	request.CreatedBy = claims.UserId
+
+	idempotencyKey := strings.TrimSpace(c.Get(middleware.HeaderIdempotencyKey))
+	if idempotencyKey == "" {
+		idempotencyKey = strings.TrimSpace(c.Get(middleware.HeaderXIdempotencyKey))
+	}
+	if idempotencyKey != "" {
+		request.IdempotencyKey = idempotencyKey
+	}
 
 	ctx := c.UserContext()
 	err = common.WithTransactionContext[CreateTransactionRequest](ctx, h.db, func(tx *sqlx.Tx, req CreateTransactionRequest) error {

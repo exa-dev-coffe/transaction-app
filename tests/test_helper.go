@@ -382,6 +382,10 @@ func GenerateTestToken(userId int64, email, role string) string {
 }
 
 func ExecuteTestRequest(app *fiber.App, method, url string, body []byte, token string) (*http.Response, error) {
+	return ExecuteTestRequestWithHeaders(app, method, url, body, token, nil)
+}
+
+func ExecuteTestRequestWithHeaders(app *fiber.App, method, url string, body []byte, token string, headers map[string]string) (*http.Response, error) {
 	var req *http.Request
 	if len(body) > 0 {
 		req = httptest.NewRequest(method, url, bytes.NewBuffer(body))
@@ -392,6 +396,10 @@ func ExecuteTestRequest(app *fiber.App, method, url string, body []byte, token s
 
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
+	}
+
+	for k, v := range headers {
+		req.Header.Set(k, v)
 	}
 
 	return app.Test(req, 5000)

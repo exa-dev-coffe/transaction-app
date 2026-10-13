@@ -63,13 +63,14 @@ type Data struct {
 }
 
 type CreateTransactionRequest struct {
-	TableId     int64   `json:"tableId" validate:"required"`
-	OrderFor    string  `json:"orderFor" validate:"required"`
-	Pin         string  `json:"pin" validate:"required,len=6,numeric"`
-	VoucherCode string  `json:"voucherCode"`
-	Datas       []Data  `json:"datas" validate:"required,dive,required"`
-	Total       float64 `json:"total"`
-	CreatedBy   int64   `json:"createdBy"`
+	TableId        int64   `json:"tableId" validate:"required"`
+	OrderFor       string  `json:"orderFor" validate:"required"`
+	Pin            string  `json:"pin" validate:"required,len=6,numeric"`
+	VoucherCode    string  `json:"voucherCode"`
+	Datas          []Data  `json:"datas" validate:"required,dive,required"`
+	Total          float64 `json:"total"`
+	CreatedBy      int64   `json:"createdBy"`
+	IdempotencyKey string  `json:"idempotencyKey,omitempty"`
 }
 
 type CreatePosTransactionRequest struct {
@@ -84,6 +85,7 @@ type CreatePosTransactionRequest struct {
 	Datas             []Data  `json:"datas" validate:"required,dive,required"`
 	Total             float64 `json:"total"`
 	CreatedBy         int64   `json:"createdBy"`
+	IdempotencyKey    string  `json:"idempotencyKey,omitempty"`
 }
 
 type ChangePosPaymentMethodRequest struct {
