@@ -57,7 +57,7 @@ func (s *transactionService) CreateTransaction(ctx context.Context, tx *sqlx.Tx,
 		}
 		ids += fmt.Sprintf("%d", data.MenuID)
 	}
-	menus, err := getAvailableMenuByIdsAndTableById(ids, request.TableId)
+	menus, err := getAvailableMenusResilient(ctx, ids, request.TableId)
 	if err != nil {
 		return err
 	}
@@ -124,7 +124,7 @@ func (s *transactionService) CreateTransaction(ctx context.Context, tx *sqlx.Tx,
 	}
 
 	// 2. Perform Wallet Payment AFTER DB records are established in transaction
-	err = paymentUseWallet(request.CreatedBy, request.Total, request.Pin)
+	err = paymentUseWalletResilient(ctx, request.CreatedBy, request.Total, request.Pin)
 	if err != nil {
 		return err
 	}
@@ -225,7 +225,7 @@ func (s *transactionService) CreatePosTransaction(ctx context.Context, tx *sqlx.
 		tableId = *request.TableId
 	}
 
-	menus, err := getAvailableMenuByIdsAndTableById(ids, tableId)
+	menus, err := getAvailableMenusResilient(ctx, ids, tableId)
 	if err != nil {
 		return nil, err
 	}
@@ -324,7 +324,7 @@ func (s *transactionService) CreatePosTransaction(ctx context.Context, tx *sqlx.
 
 	// 2. Execute External Payment Processing AFTER DB record is established in transaction
 	if strings.EqualFold(request.PaymentMethod, "WALLET") {
-		walletRes, err := payPosWallet(request.WalletPaymentCode, request.Total, int64(id))
+		walletRes, err := payPosWalletResilient(ctx, request.WalletPaymentCode, request.Total, int64(id))
 		if err != nil {
 			return nil, err
 		}
@@ -557,7 +557,7 @@ func (s *transactionService) ChangePosPaymentMethod(ctx context.Context, tx *sql
 			return nil, response.BadRequest("Payment code must be 6 digits", nil)
 		}
 
-		walletRes, err := payPosWallet(request.WalletPaymentCode, orderDetail.TotalPrice, int64(id))
+		walletRes, err := payPosWalletResilient(ctx, request.WalletPaymentCode, orderDetail.TotalPrice, int64(id))
 		if err != nil {
 			return nil, err
 		}
@@ -566,7 +566,7 @@ func (s *transactionService) ChangePosPaymentMethod(ctx context.Context, tx *sql
 		defer func() {
 			if !success && walletRes != nil && walletRes.UserId > 0 {
 				slog.Error("POS transaction DB update failed after wallet payment. Triggering auto-refund", "orderId", id, "userId", walletRes.UserId)
-				_ = refundPosWallet(walletRes.UserId, orderDetail.TotalPrice, int64(id))
+				_ = refundPosWalletResilient(context.Background(), walletRes.UserId, orderDetail.TotalPrice, int64(id))
 			}
 		}()
 
@@ -638,7 +638,7 @@ func (s *transactionService) GetListTransactionsPagination(ctx context.Context, 
 	userIdsStr := strings.Join(userIds, ",")
 
 	if menuIdsStr != "" && userIdsStr != "" {
-		dataMenusAndTable, err := getDataMenuByIdsAndTable(menuIdsStr, tableIdsStr)
+		dataMenusAndTable, err := getDataMenuByIdsAndTableResilient(ctx, menuIdsStr, tableIdsStr)
 		if err != nil {
 			return nil, err
 		}
@@ -728,7 +728,7 @@ func (s *transactionService) GetListTransactionsNoPagination(ctx context.Context
 	userIdsStr := strings.Join(userIds, ",")
 
 	if menuIdsStr != "" && userIdsStr != "" {
-		dataMenusAndTable, err := getDataMenuByIdsAndTable(menuIdsStr, tableIdsStr)
+		dataMenusAndTable, err := getDataMenuByIdsAndTableResilient(ctx, menuIdsStr, tableIdsStr)
 		if err != nil {
 			return nil, err
 		}
@@ -807,7 +807,7 @@ func (s *transactionService) GetOneTransaction(ctx context.Context, request *com
 	menuIdsStr := strings.Join(menuIds, ",")
 
 	if menuIdsStr != "" && userIdStr != "" {
-		dataMenusAndTable, err := getDataMenuByIdsAndTable(menuIdsStr, tableIdStr)
+		dataMenusAndTable, err := getDataMenuByIdsAndTableResilient(ctx, menuIdsStr, tableIdStr)
 		if err != nil {
 			return nil, err
 		}
@@ -873,7 +873,7 @@ func (s *transactionService) GetListTransactionsByUserId(ctx context.Context, re
 		tableIdsStr = "0"
 	}
 	if menuIdsStr != "" {
-		dataMenusAndTable, err := getDataMenuByIdsAndTable(menuIdsStr, tableIdsStr)
+		dataMenusAndTable, err := getDataMenuByIdsAndTableResilient(ctx, menuIdsStr, tableIdsStr)
 		if err != nil {
 			return nil, err
 		}
@@ -943,7 +943,7 @@ func (s *transactionService) GetOneTransactionByUserId(ctx context.Context, requ
 	menuIdsStr := strings.Join(menuIds, ",")
 
 	if menuIdsStr != "" {
-		dataMenusAndTable, err := getDataMenuByIdsAndTable(menuIdsStr, tableIdStr)
+		dataMenusAndTable, err := getDataMenuByIdsAndTableResilient(ctx, menuIdsStr, tableIdStr)
 		if err != nil {
 			return nil, err
 		}

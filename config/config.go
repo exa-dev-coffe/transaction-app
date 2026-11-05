@@ -33,6 +33,9 @@ type appConfig struct {
 	RedisUsername        string
 	RedisPassword        string
 	ServiceTransactionUrl string
+	ServiceMasterDataGrpcUrl string
+	ServiceWalletGrpcUrl     string
+	EnableGrpc               bool
 }
 
 var Config appConfig
@@ -73,6 +76,9 @@ func init() {
 		RedisUsername:        viper.GetString("REDIS_USERNAME"),
 		RedisPassword:        viper.GetString("REDIS_PASSWORD"),
 		ServiceTransactionUrl: viper.GetString("SERVICE_TRANSACTION_URL"),
+		ServiceMasterDataGrpcUrl: viper.GetString("SERVICE_MASTER_DATA_GRPC_URL"),
+		ServiceWalletGrpcUrl:     viper.GetString("SERVICE_WALLET_GRPC_URL"),
+		EnableGrpc:               viper.GetBool("ENABLE_GRPC"),
 	}
 	if Config.ServiceMasterDataUrl == "" {
 		Config.ServiceMasterDataUrl = "http://localhost:8081"
@@ -85,5 +91,14 @@ func init() {
 	}
 	if Config.ServiceTransactionUrl == "" {
 		Config.ServiceTransactionUrl = "http://localhost:8084"
+	}
+	if Config.ServiceMasterDataGrpcUrl == "" {
+		Config.ServiceMasterDataGrpcUrl = "localhost:9081"
+	}
+	if Config.ServiceWalletGrpcUrl == "" {
+		Config.ServiceWalletGrpcUrl = "localhost:9082"
+	}
+	if !viper.IsSet("ENABLE_GRPC") {
+		Config.EnableGrpc = true
 	}
 }
