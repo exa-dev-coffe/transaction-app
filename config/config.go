@@ -35,6 +35,8 @@ type appConfig struct {
 	ServiceTransactionUrl string
 	ServiceMasterDataGrpcUrl string
 	ServiceWalletGrpcUrl     string
+	ServiceInventoryUrl      string
+	ServiceInventoryGrpcUrl  string
 	EnableGrpc               bool
 }
 
@@ -78,6 +80,8 @@ func init() {
 		ServiceTransactionUrl: viper.GetString("SERVICE_TRANSACTION_URL"),
 		ServiceMasterDataGrpcUrl: viper.GetString("SERVICE_MASTER_DATA_GRPC_URL"),
 		ServiceWalletGrpcUrl:     viper.GetString("SERVICE_WALLET_GRPC_URL"),
+		ServiceInventoryUrl:      viper.GetString("SERVICE_INVENTORY_URL"),
+		ServiceInventoryGrpcUrl:  viper.GetString("SERVICE_INVENTORY_GRPC_URL"),
 		EnableGrpc:               viper.GetBool("ENABLE_GRPC"),
 	}
 	if Config.ServiceMasterDataUrl == "" {
@@ -92,11 +96,17 @@ func init() {
 	if Config.ServiceTransactionUrl == "" {
 		Config.ServiceTransactionUrl = "http://localhost:8084"
 	}
+	if Config.ServiceInventoryUrl == "" {
+		Config.ServiceInventoryUrl = "http://localhost:8086"
+	}
 	if Config.ServiceMasterDataGrpcUrl == "" {
 		Config.ServiceMasterDataGrpcUrl = "localhost:9081"
 	}
 	if Config.ServiceWalletGrpcUrl == "" {
 		Config.ServiceWalletGrpcUrl = "localhost:9082"
+	}
+	if Config.ServiceInventoryGrpcUrl == "" {
+		Config.ServiceInventoryGrpcUrl = "localhost:9086"
 	}
 	if !viper.IsSet("ENABLE_GRPC") {
 		Config.EnableGrpc = true

@@ -1,15 +1,19 @@
 package transaction
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"sync"
 	"time"
 
 	"eka-dev.cloud/transaction-service/config"
+	inventorypb "eka-dev.cloud/transaction-service/pb/inventory"
 	masterdatapb "eka-dev.cloud/transaction-service/pb/masterdata"
 	walletpb "eka-dev.cloud/transaction-service/pb/wallet"
+	"eka-dev.cloud/transaction-service/utils"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
@@ -24,6 +28,11 @@ var (
 	wltClient      walletpb.WalletServiceClient
 	wltClientOnce  sync.Once
 	wltClientLock  sync.RWMutex
+
+	invClientConn  *grpc.ClientConn
+	invClient      inventorypb.InventoryServiceClient
+	invClientOnce  sync.Once
+	invClientLock  sync.RWMutex
 )
 
 // getMasterDataGrpcClient returns the singleton gRPC client for MasterData
@@ -261,4 +270,261 @@ func refundPosWalletResilient(ctx context.Context, userId int64, amount float64,
 	}
 
 	return refundPosWallet(userId, amount, orderId)
+}
+
+// getInventoryGrpcClient returns the singleton gRPC client for Inventory
+func getInventoryGrpcClient() (inventorypb.InventoryServiceClient, error) {
+	if !config.Config.EnableGrpc {
+		return nil, fmt.Errorf("gRPC disabled in config")
+	}
+
+	invClientLock.RLock()
+	if invClient != nil {
+		defer invClientLock.RUnlock()
+		return invClient, nil
+	}
+	invClientLock.RUnlock()
+
+	invClientLock.Lock()
+	defer invClientLock.Unlock()
+
+	if invClient != nil {
+		return invClient, nil
+	}
+
+	addr := config.Config.ServiceInventoryGrpcUrl
+	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create gRPC client for inventory at %s: %w", addr, err)
+	}
+
+	invClientConn = conn
+	invClient = inventorypb.NewInventoryServiceClient(conn)
+	slog.Info("Initialized Inventory gRPC client", "address", addr)
+	return invClient, nil
+}
+
+// Resilient helper: Try gRPC first, fallback to HTTP REST for stock availability check
+func checkStockResilient(ctx context.Context, items []*inventorypb.OrderItemPayload) (*inventorypb.CheckStockResponse, error) {
+	client, err := getInventoryGrpcClient()
+	if err == nil {
+		grpcCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		defer cancel()
+
+		resp, err := client.CheckStockAvailability(grpcCtx, &inventorypb.CheckStockRequest{Items: items})
+		if err == nil && resp != nil {
+			slog.Debug("Checked stock availability via gRPC successfully", "isAvailable", resp.IsAvailable)
+			return resp, nil
+		}
+		slog.Warn("Inventory gRPC CheckStockAvailability failed, falling back to HTTP REST", "error", err)
+	}
+
+	return checkStockHttp(items)
+}
+
+func checkStockHttp(items []*inventorypb.OrderItemPayload) (*inventorypb.CheckStockResponse, error) {
+	type itemDto struct {
+		MenuID   int64 `json:"menu_id"`
+		Quantity int32 `json:"quantity"`
+	}
+	payloadItems := make([]itemDto, 0, len(items))
+	for _, it := range items {
+		payloadItems = append(payloadItems, itemDto{
+			MenuID:   it.MenuId,
+			Quantity: it.Quantity,
+		})
+	}
+
+	reqBody := map[string]interface{}{
+		"items": payloadItems,
+	}
+	bodyBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal stock check request: %w", err)
+	}
+
+	timestamp := time.Now().UTC().Format(time.RFC3339)
+	sig, err := createSignature("", string(bodyBytes), timestamp)
+	if err != nil {
+		return nil, err
+	}
+
+	url := fmt.Sprintf("%s/api/internal/stock/check", config.Config.ServiceInventoryUrl)
+	respBytes, err := utils.InternalRequest(sig, timestamp, url, "POST", bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, err
+	}
+
+	type checkHttpResp struct {
+		Success bool `json:"success"`
+		Data    struct {
+			IsAvailable  bool `json:"is_available"`
+			MissingItems []struct {
+				MenuID         int64   `json:"menu_id"`
+				IngredientName string  `json:"ingredient_name"`
+				StockAvailable float64 `json:"stock_available"`
+				StockNeeded    float64 `json:"stock_needed"`
+			} `json:"missing_items"`
+		} `json:"data"`
+	}
+
+	var res checkHttpResp
+	if err := json.Unmarshal(respBytes, &res); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal stock check response: %w", err)
+	}
+
+	missing := make([]*inventorypb.UnavailableItem, 0, len(res.Data.MissingItems))
+	for _, m := range res.Data.MissingItems {
+		missing = append(missing, &inventorypb.UnavailableItem{
+			MenuId:         m.MenuID,
+			IngredientName: m.IngredientName,
+			StockAvailable: m.StockAvailable,
+			StockNeeded:    m.StockNeeded,
+		})
+	}
+
+	return &inventorypb.CheckStockResponse{
+		IsAvailable:  res.Data.IsAvailable,
+		MissingItems: missing,
+	}, nil
+}
+
+// Resilient helper: Try gRPC first, fallback to HTTP REST for stock deduction
+func deductStockResilient(ctx context.Context, transactionId string, items []*inventorypb.OrderItemPayload) error {
+	client, err := getInventoryGrpcClient()
+	if err == nil {
+		grpcCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		defer cancel()
+
+		resp, err := client.DeductStock(grpcCtx, &inventorypb.DeductStockRequest{
+			TransactionId: transactionId,
+			Items:         items,
+		})
+		if err == nil && resp != nil && resp.Success {
+			slog.Debug("Deducted stock via gRPC successfully", "transactionId", transactionId)
+			return nil
+		}
+		slog.Warn("Inventory gRPC DeductStock failed, falling back to HTTP REST", "error", err)
+	}
+
+	return deductStockHttp(transactionId, items)
+}
+
+func deductStockHttp(transactionId string, items []*inventorypb.OrderItemPayload) error {
+	type itemDto struct {
+		MenuID   int64 `json:"menu_id"`
+		Quantity int32 `json:"quantity"`
+	}
+	payloadItems := make([]itemDto, 0, len(items))
+	for _, it := range items {
+		payloadItems = append(payloadItems, itemDto{
+			MenuID:   it.MenuId,
+			Quantity: it.Quantity,
+		})
+	}
+
+	reqBody := map[string]interface{}{
+		"transaction_id": transactionId,
+		"items":          payloadItems,
+	}
+	bodyBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		return fmt.Errorf("failed to marshal deduct stock request: %w", err)
+	}
+
+	timestamp := time.Now().UTC().Format(time.RFC3339)
+	sig, err := createSignature("", string(bodyBytes), timestamp)
+	if err != nil {
+		return err
+	}
+
+	url := fmt.Sprintf("%s/api/internal/stock/deduct", config.Config.ServiceInventoryUrl)
+	respBytes, err := utils.InternalRequest(sig, timestamp, url, "POST", bytes.NewReader(bodyBytes))
+	if err != nil {
+		return err
+	}
+
+	type deductHttpResp struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+	}
+	var res deductHttpResp
+	if err := json.Unmarshal(respBytes, &res); err != nil {
+		return fmt.Errorf("failed to unmarshal deduct stock response: %w", err)
+	}
+	if !res.Success {
+		return fmt.Errorf("deduct stock failed: %s", res.Message)
+	}
+
+	return nil
+}
+
+// Resilient helper: Try gRPC first, fallback to HTTP REST for stock rollback
+func rollbackStockResilient(ctx context.Context, transactionId string, items []*inventorypb.OrderItemPayload) error {
+	client, err := getInventoryGrpcClient()
+	if err == nil {
+		grpcCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		defer cancel()
+
+		resp, err := client.RollbackStock(grpcCtx, &inventorypb.RollbackStockRequest{
+			TransactionId: transactionId,
+			Items:         items,
+		})
+		if err == nil && resp != nil && resp.Success {
+			slog.Debug("Rolled back stock via gRPC successfully", "transactionId", transactionId)
+			return nil
+		}
+		slog.Warn("Inventory gRPC RollbackStock failed, falling back to HTTP REST", "error", err)
+	}
+
+	return rollbackStockHttp(transactionId, items)
+}
+
+func rollbackStockHttp(transactionId string, items []*inventorypb.OrderItemPayload) error {
+	type itemDto struct {
+		MenuID   int64 `json:"menu_id"`
+		Quantity int32 `json:"quantity"`
+	}
+	payloadItems := make([]itemDto, 0, len(items))
+	for _, it := range items {
+		payloadItems = append(payloadItems, itemDto{
+			MenuID:   it.MenuId,
+			Quantity: it.Quantity,
+		})
+	}
+
+	reqBody := map[string]interface{}{
+		"transaction_id": transactionId,
+		"items":          payloadItems,
+	}
+	bodyBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		return fmt.Errorf("failed to marshal rollback stock request: %w", err)
+	}
+
+	timestamp := time.Now().UTC().Format(time.RFC3339)
+	sig, err := createSignature("", string(bodyBytes), timestamp)
+	if err != nil {
+		return err
+	}
+
+	url := fmt.Sprintf("%s/api/internal/stock/rollback", config.Config.ServiceInventoryUrl)
+	respBytes, err := utils.InternalRequest(sig, timestamp, url, "POST", bytes.NewReader(bodyBytes))
+	if err != nil {
+		return err
+	}
+
+	type rollbackHttpResp struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+	}
+	var res rollbackHttpResp
+	if err := json.Unmarshal(respBytes, &res); err != nil {
+		return fmt.Errorf("failed to unmarshal rollback stock response: %w", err)
+	}
+	if !res.Success {
+		return fmt.Errorf("rollback stock failed: %s", res.Message)
+	}
+
+	return nil
 }

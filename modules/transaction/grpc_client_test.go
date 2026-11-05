@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"eka-dev.cloud/transaction-service/config"
+	inventorypb "eka-dev.cloud/transaction-service/pb/inventory"
 	masterdatapb "eka-dev.cloud/transaction-service/pb/masterdata"
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc"
@@ -121,4 +122,106 @@ func TestGrpcClient_FallbackToHttpWhenGrpcOffline(t *testing.T) {
 	assert.Len(t, menus, 1)
 	assert.Equal(t, 88, menus[0].Id)
 	assert.Equal(t, "HTTP Fallback Latte", menus[0].Name)
+}
+
+// mockInventoryGrpcServer implements inventorypb.InventoryServiceServer for testing
+type mockInventoryGrpcServer struct {
+	inventorypb.UnimplementedInventoryServiceServer
+}
+
+func (m *mockInventoryGrpcServer) CheckStockAvailability(ctx context.Context, req *inventorypb.CheckStockRequest) (*inventorypb.CheckStockResponse, error) {
+	return &inventorypb.CheckStockResponse{
+		IsAvailable:  true,
+		MissingItems: nil,
+	}, nil
+}
+
+func (m *mockInventoryGrpcServer) DeductStock(ctx context.Context, req *inventorypb.DeductStockRequest) (*inventorypb.DeductStockResponse, error) {
+	return &inventorypb.DeductStockResponse{
+		Success: true,
+		Message: "Stock deducted successfully",
+	}, nil
+}
+
+func (m *mockInventoryGrpcServer) RollbackStock(ctx context.Context, req *inventorypb.RollbackStockRequest) (*inventorypb.RollbackStockResponse, error) {
+	return &inventorypb.RollbackStockResponse{
+		Success: true,
+		Message: "Stock rolled back successfully",
+	}, nil
+}
+
+func TestInventoryGrpcClient_SuccessWhenGrpcActive(t *testing.T) {
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	assert.NoError(t, err)
+	defer lis.Close()
+
+	grpcServer := grpc.NewServer()
+	inventorypb.RegisterInventoryServiceServer(grpcServer, &mockInventoryGrpcServer{})
+	go grpcServer.Serve(lis)
+	defer grpcServer.Stop()
+
+	config.Config.EnableGrpc = true
+	config.Config.ServiceInventoryGrpcUrl = lis.Addr().String()
+
+	invClientLock.Lock()
+	if invClientConn != nil {
+		_ = invClientConn.Close()
+	}
+	invClientConn = nil
+	invClient = nil
+	invClientLock.Unlock()
+
+	items := []*inventorypb.OrderItemPayload{
+		{MenuId: 1, Quantity: 2},
+	}
+	res, err := checkStockResilient(context.Background(), items)
+	assert.NoError(t, err)
+	assert.True(t, res.IsAvailable)
+
+	err = deductStockResilient(context.Background(), "tx-123", items)
+	assert.NoError(t, err)
+}
+
+func TestInventoryGrpcClient_FallbackToHttpWhenGrpcOffline(t *testing.T) {
+	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		type checkResp struct {
+			Success bool `json:"success"`
+			Data    struct {
+				IsAvailable  bool `json:"is_available"`
+				MissingItems []struct {
+					MenuID         int64   `json:"menu_id"`
+					IngredientName string  `json:"ingredient_name"`
+					StockAvailable float64 `json:"stock_available"`
+					StockNeeded    float64 `json:"stock_needed"`
+				} `json:"missing_items"`
+			} `json:"data"`
+		}
+		resp := checkResp{
+			Success: true,
+		}
+		resp.Data.IsAvailable = true
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer httpServer.Close()
+
+	config.Config.EnableGrpc = true
+	config.Config.ServiceInventoryGrpcUrl = "127.0.0.1:59999" // intentionally offline port
+	config.Config.ServiceInventoryUrl = httpServer.URL
+	config.Config.Secret = "dummy_secret"
+
+	invClientLock.Lock()
+	if invClientConn != nil {
+		_ = invClientConn.Close()
+	}
+	invClientConn = nil
+	invClient = nil
+	invClientLock.Unlock()
+
+	items := []*inventorypb.OrderItemPayload{
+		{MenuId: 2, Quantity: 1},
+	}
+	res, err := checkStockResilient(context.Background(), items)
+	assert.NoError(t, err)
+	assert.True(t, res.IsAvailable)
 }

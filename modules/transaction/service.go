@@ -14,6 +14,7 @@ import (
 	"eka-dev.cloud/transaction-service/config"
 	"eka-dev.cloud/transaction-service/lib"
 	"eka-dev.cloud/transaction-service/modules/voucher"
+	inventorypb "eka-dev.cloud/transaction-service/pb/inventory"
 	"eka-dev.cloud/transaction-service/utils"
 	"eka-dev.cloud/transaction-service/utils/common"
 	"eka-dev.cloud/transaction-service/utils/response"
@@ -64,6 +65,23 @@ func (s *transactionService) CreateTransaction(ctx context.Context, tx *sqlx.Tx,
 
 	if len(menus) != len(request.Datas) {
 		return response.BadRequest("No menus found for the given IDs", nil)
+	}
+
+	// Stock Availability Check with Inventory Service (gRPC with HTTP fallback)
+	invItems := make([]*inventorypb.OrderItemPayload, 0, len(request.Datas))
+	for _, data := range request.Datas {
+		invItems = append(invItems, &inventorypb.OrderItemPayload{
+			MenuId:   int64(data.MenuID),
+			Quantity: int32(data.Qty),
+		})
+	}
+	stockCheck, err := checkStockResilient(ctx, invItems)
+	if err == nil && stockCheck != nil && !stockCheck.IsAvailable {
+		var details string
+		for _, miss := range stockCheck.MissingItems {
+			details += fmt.Sprintf(" [Menu %d: needs %0.1f of %s, only %0.1f available]", miss.MenuId, miss.StockNeeded, miss.IngredientName, miss.StockAvailable)
+		}
+		return response.BadRequest("Insufficient inventory stock:"+details, nil)
 	}
 
 	request.Total = calculateTotalPriceMenu(menus, &request)
@@ -127,6 +145,12 @@ func (s *transactionService) CreateTransaction(ctx context.Context, tx *sqlx.Tx,
 	err = paymentUseWalletResilient(ctx, request.CreatedBy, request.Total, request.Pin)
 	if err != nil {
 		return err
+	}
+
+	// 3. Deduct Stock via Inventory Service
+	txIdStr := fmt.Sprintf("%d", id)
+	if err := deductStockResilient(ctx, txIdStr, invItems); err != nil {
+		slog.Error("Failed to deduct inventory stock, but transaction created", "transactionId", id, "error", err)
 	}
 
 	// Trigger notifications asynchronously after successful creation
@@ -232,6 +256,23 @@ func (s *transactionService) CreatePosTransaction(ctx context.Context, tx *sqlx.
 
 	if len(menus) != len(request.Datas) {
 		return nil, response.BadRequest("No menus found for the given IDs", nil)
+	}
+
+	// Stock Availability Check with Inventory Service (gRPC with HTTP fallback)
+	invItems := make([]*inventorypb.OrderItemPayload, 0, len(request.Datas))
+	for _, data := range request.Datas {
+		invItems = append(invItems, &inventorypb.OrderItemPayload{
+			MenuId:   int64(data.MenuID),
+			Quantity: int32(data.Qty),
+		})
+	}
+	stockCheck, err := checkStockResilient(ctx, invItems)
+	if err == nil && stockCheck != nil && !stockCheck.IsAvailable {
+		var details string
+		for _, miss := range stockCheck.MissingItems {
+			details += fmt.Sprintf(" [Menu %d: needs %0.1f of %s, only %0.1f available]", miss.MenuId, miss.StockNeeded, miss.IngredientName, miss.StockAvailable)
+		}
+		return nil, response.BadRequest("Insufficient inventory stock:"+details, nil)
 	}
 
 	// Calculate total price
@@ -346,6 +387,12 @@ func (s *transactionService) CreatePosTransaction(ctx context.Context, tx *sqlx.
 		qrString = qrisRes.QrString
 		qrUrl = qrisRes.QrUrl
 		_ = s.repo.UpdatePosQrisData(ctx, tx, id, qrString, qrUrl)
+	}
+
+	// Deduct stock via Inventory Service
+	posTxIdStr := fmt.Sprintf("POS-%d", id)
+	if err := deductStockResilient(ctx, posTxIdStr, invItems); err != nil {
+		slog.Error("Failed to deduct inventory stock for POS order", "orderId", id, "error", err)
 	}
 
 	// Trigger notifications asynchronously if already paid (CASH or WALLET)
