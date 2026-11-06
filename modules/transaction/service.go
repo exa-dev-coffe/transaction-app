@@ -35,6 +35,7 @@ type Service interface {
 	GetListTransactionsByUserId(ctx context.Context, request common.ParamsListRequest, userId int64, name string) (*response.Pagination[[]TransactionResponse], error)
 	GetOneTransactionByUserId(ctx context.Context, request *common.OneRequest, userId int64, name string) (*TransactionResponse, error)
 	UpdateOrderStatus(ctx context.Context, tx *sqlx.Tx, request UpdateOrderStatusRequest) error
+	CancelOrderOutOfStock(ctx context.Context, tx *sqlx.Tx, request CancelOrderOutOfStockRequest) error
 	SetRatingMenu(ctx context.Context, tx *sqlx.Tx, request SetRatingMenuRequest) error
 	SummaryReportTransactions(ctx context.Context, startDate string, endDate string) (*SummaryReportData, error)
 }
@@ -1053,6 +1054,76 @@ func (s *transactionService) UpdateOrderStatus(ctx context.Context, tx *sqlx.Tx,
 		payloadObj := ssePayloadObj{
 			Event: "update_order_status",
 			Data:  orderDetail,
+		}
+		ssePayload, err := json.Marshal(payloadObj)
+		if err != nil {
+			slog.Error("Failed to marshal SSE payload", "error", err)
+			return
+		}
+
+		// Publish to order.created fanout exchange
+		err = lib.SendMessage(ch, "", "", "order.created", lib.ExchangeFanout, amqp.Publishing{
+			ContentType: "application/json",
+			Body:        ssePayload,
+		}, string(ssePayload), false, false, true, amqp.Table{})
+		if err != nil {
+			slog.Error("Failed to publish SSE status update message", "error", err)
+		}
+	}()
+
+	return nil
+}
+
+func (s *transactionService) CancelOrderOutOfStock(ctx context.Context, tx *sqlx.Tx, request CancelOrderOutOfStockRequest) error {
+	orderDetail, err := s.GetOneTransaction(ctx, &common.OneRequest{Id: request.Id})
+	if err != nil {
+		return err
+	}
+
+	if orderDetail.OrderStatus >= 2 {
+		return response.BadRequest("Order cannot be cancelled because it is already completed or cancelled", nil)
+	}
+
+	// Step 1: Wallet Instant Refund if paid via WALLET
+	if strings.EqualFold(orderDetail.PaymentStatus, "PAID") && (strings.EqualFold(orderDetail.PaymentMethod, "WALLET") || strings.EqualFold(orderDetail.PaymentMethod, "E-WALLET")) && orderDetail.UserId > 0 {
+		err := refundPosWalletResilient(ctx, orderDetail.UserId, orderDetail.TotalPrice, int64(request.Id))
+		if err != nil {
+			slog.Error("Failed to auto-refund wallet during out-of-stock cancellation", "error", err, "orderId", request.Id, "userId", orderDetail.UserId)
+			return response.InternalServerError("Failed to refund customer wallet: "+err.Error(), nil)
+		}
+		slog.Info("Successfully auto-refunded wallet for cancelled order", "orderId", request.Id, "userId", orderDetail.UserId, "amount", orderDetail.TotalPrice)
+	}
+
+	// Step 2: Update Order Status in Database
+	err = s.repo.CancelOrderWithRefund(ctx, tx, request.Id, request.Reason, request.UpdatedBy)
+	if err != nil {
+		return err
+	}
+
+	// Step 3: Trigger real-time status update notification asynchronously
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+
+		updatedDetail, err := s.GetOneTransaction(context.Background(), &common.OneRequest{Id: request.Id})
+		if err != nil {
+			slog.Error("Failed to fetch full order details for SSE update status", "error", err)
+			return
+		}
+
+		ch, err := lib.GetChannel()
+		if err != nil {
+			slog.Error("Failed to get rabbitmq channel for status update SSE", "error", err)
+			return
+		}
+		defer ch.Close()
+
+		type ssePayloadObj struct {
+			Event string               `json:"event"`
+			Data  *TransactionResponse `json:"data"`
+		}
+		payloadObj := ssePayloadObj{
+			Event: "update_order_status",
+			Data:  updatedDetail,
 		}
 		ssePayload, err := json.Marshal(payloadObj)
 		if err != nil {

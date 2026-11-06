@@ -33,6 +33,7 @@ type Repository interface {
 	GetListTransactionsByUserId(ctx context.Context, params common.ParamsListRequest, userId int64) (*response.Pagination[[]TransactionResponse], error)
 	GetOneTransactionByUserId(ctx context.Context, id int, userId int64) (*TransactionResponse, error)
 	UpdateOrderStatus(ctx context.Context, tx *sqlx.Tx, id int, updatedBy int64) error
+	CancelOrderWithRefund(ctx context.Context, tx *sqlx.Tx, id int, cancelReason string, updatedBy int64) error
 	UpdatePaymentStatus(ctx context.Context, tx *sqlx.Tx, id int, status string) error
 	UpdatePosPaymentMethod(ctx context.Context, tx *sqlx.Tx, id int, paymentMethod string, paymentStatus string, cashAmount float64, cashChange float64) error
 	UpdatePosWalletCustomer(ctx context.Context, tx *sqlx.Tx, id int, userId int64, orderFor string) error
@@ -385,6 +386,25 @@ func (r *transactionRepository) UpdateOrderStatus(ctx context.Context, tx *sqlx.
 
 	err = validateAffectedRows(result, "No rows were updated, possibly due to invalid ID or order status already at maximum")
 
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (r *transactionRepository) CancelOrderWithRefund(ctx context.Context, tx *sqlx.Tx, id int, cancelReason string, updatedBy int64) error {
+	query := `UPDATE th_user_checkouts 
+	          SET order_status = 3, payment_status = 'REFUNDED', updated_by = $1, updated_at = NOW() 
+	          WHERE id = $2 AND order_status < 2`
+
+	result, err := tx.ExecContext(ctx, query, updatedBy, id)
+	if err != nil {
+		slog.Error("Failed to cancel order with refund in DB", "error", err, "id", id)
+		return response.InternalServerError("Failed to cancel order", nil)
+	}
+
+	err = validateAffectedRows(result, "Order cannot be cancelled (might not exist or already completed/cancelled)")
 	if err != nil {
 		return err
 	}

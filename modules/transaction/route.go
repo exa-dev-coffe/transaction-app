@@ -24,6 +24,7 @@ type Handler interface {
 	GetListTransactionsByUserId(c *fiber.Ctx) error
 	GetOneTransactionByUserId(c *fiber.Ctx) error
 	UpdateOrderStatus(c *fiber.Ctx) error
+	CancelOrderOutOfStock(c *fiber.Ctx) error
 	SetRatingMenu(c *fiber.Ctx) error
 	SummaryReportTransactions(c *fiber.Ctx) error
 }
@@ -53,6 +54,7 @@ func NewHandler(app *fiber.App, service Service, db *sqlx.DB) Handler {
 	routes.Get("/history-checkouts", middleware.RequireAuth, h.GetListTransactionsByUserId)
 	routes.Get("/history-checkouts/detail", middleware.RequireAuth, h.GetOneTransactionByUserId)
 	routes.Patch("/transactions/update-order-status", middleware.RequirePermission("order", "edit"), h.UpdateOrderStatus)
+	routes.Post("/transactions/cancel-out-of-stock", middleware.RequirePermission("order", "edit"), h.CancelOrderOutOfStock)
 	routes.Patch("/history-checkouts/set-rating-menu", middleware.RequireAuth, h.SetRatingMenu)
 	routes.Get("/transactions/summary-report", middleware.RequireAnyPermission(
 		middleware.FeatureAction{Feature: "report", Action: "view"},
@@ -384,6 +386,37 @@ func (h *handler) UpdateOrderStatus(c *fiber.Ctx) error {
 	}
 
 	return c.Status(fiber.StatusOK).JSON(response.Success("Order status updated successfully", nil))
+}
+
+func (h *handler) CancelOrderOutOfStock(c *fiber.Ctx) error {
+	// Parse request body
+	var request CancelOrderOutOfStockRequest
+	if err := c.BodyParser(&request); err != nil {
+		slog.Error("Failed to parse cancel out-of-stock request body", "error", err)
+		return response.BadRequest("Invalid request body", nil)
+	}
+
+	err := lib.ValidateRequest(request)
+	if err != nil {
+		return err
+	}
+
+	claims, err := common.GetClaimsFromLocals(c)
+	if err != nil {
+		return err
+	}
+
+	request.UpdatedBy = claims.UserId
+
+	ctx := c.UserContext()
+	err = common.WithTransactionContext[CancelOrderOutOfStockRequest](ctx, h.db, func(tx *sqlx.Tx, req CancelOrderOutOfStockRequest) error {
+		return h.service.CancelOrderOutOfStock(ctx, tx, req)
+	}, request)
+	if err != nil {
+		return err
+	}
+
+	return c.Status(fiber.StatusOK).JSON(response.Success("Order cancelled and refund processed successfully", nil))
 }
 
 func (h *handler) SetRatingMenu(c *fiber.Ctx) error {
