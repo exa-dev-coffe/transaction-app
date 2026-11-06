@@ -1094,13 +1094,37 @@ func (s *transactionService) CancelOrderOutOfStock(ctx context.Context, tx *sqlx
 		slog.Info("Successfully auto-refunded wallet for cancelled order", "orderId", request.Id, "userId", orderDetail.UserId, "amount", orderDetail.TotalPrice)
 	}
 
-	// Step 2: Update Order Status in Database
+	// Step 2: Rollback Stock if reason is NOT physical depletion (e.g. customer cancelled / wrong order before brewing)
+	isPhysicalLoss := strings.EqualFold(request.Reason, "STOCK_MISCALCULATION") ||
+		strings.EqualFold(request.Reason, "DAMAGED_OR_SPOILED") ||
+		strings.EqualFold(request.Reason, "EQUIPMENT_FAILURE")
+
+	if !isPhysicalLoss && len(orderDetail.Details) > 0 {
+		var invItems []*inventorypb.OrderItemPayload
+		for _, it := range orderDetail.Details {
+			invItems = append(invItems, &inventorypb.OrderItemPayload{
+				MenuId:   int64(it.MenuId),
+				Quantity: int32(it.Qty),
+			})
+		}
+		txIdStr := fmt.Sprintf("%d", request.Id)
+		if orderDetail.IsCashier {
+			txIdStr = fmt.Sprintf("POS-%d", request.Id)
+		}
+		if err := rollbackStockResilient(ctx, txIdStr, invItems); err != nil {
+			slog.Warn("Failed to rollback stock for non-depletion cancellation", "orderId", request.Id, "error", err)
+		} else {
+			slog.Info("Successfully rolled back stock for non-depletion cancellation", "orderId", request.Id)
+		}
+	}
+
+	// Step 3: Update Order Status in Database
 	err = s.repo.CancelOrderWithRefund(ctx, tx, request.Id, request.Reason, request.UpdatedBy)
 	if err != nil {
 		return err
 	}
 
-	// Step 3: Trigger real-time status update notification asynchronously
+	// Step 4: Trigger real-time status update notification asynchronously
 	go func() {
 		time.Sleep(50 * time.Millisecond)
 
